@@ -7,6 +7,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private const ushort DeviceVendorId = 0x0951;
     private const ushort DeviceProductId = 0x170B;
     private const string ControlInterface = "VID_0951&PID_170B&MI_03&Col03";
+    private const string HpPlayStationControlInterface = "VID_03F0&PID_0A93&MI_03&Col03";
     private const byte FeatureReportId = 0xFF;
     private const byte ConnectedValue = 1;
     private const byte NoChargingValue = 3;
@@ -17,9 +18,12 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private const int VoltageIndex = 11;
     private const int VoltageByteCount = 2;
     private const int FeatureResponseDelayMilliseconds = 20;
+    private const int FeatureResponseAttempts = 10;
     private const int StabilizationRepeatCount = 3;
     private const int PercentPerInterval = 10;
     private const float MillivoltsPerVolt = 1000f;
+    private const byte BatteryResponseType = 0x12;
+    private const byte BatteryResponseCommand = 0x05;
 
     private static readonly byte[] ConnectionCommand =
         { FeatureReportId, 0x07, 0x00, 0xFD, 0x04, 0x00, 0x00, 0x02,
@@ -42,6 +46,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
         VendorId = DeviceVendorId,
         ProductId = DeviceProductId,
         InterfacePattern = ControlInterface,
+        AlternateInterfacePatterns = [HpPlayStationControlInterface],
         BatteryCommandBytes = BatteryCommand,
         BatteryByteIndex = VoltageIndex,
         SupportsMicrophoneMuteMonitoring = false,
@@ -79,7 +84,11 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                 connection[ConnectionValueIndex] != ConnectedValue)
                 return null;
 
-            byte[]? report = await ExchangeFeatureAsync(BatteryCommand, session, cancellationToken)
+            byte[]? report = await ExchangeFeatureAsync(
+                    BatteryCommand,
+                    session,
+                    cancellationToken,
+                    IsBatteryResponse)
                 .ConfigureAwait(false);
             if (report == null || report.Length < VoltageIndex + VoltageByteCount)
                 return null;
@@ -111,7 +120,11 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
             return Task.FromResult<bool?>(IsConnected && _chargeCode.HasValue ? IsCharging : null);
     }
 
-    private async Task<byte[]?> ExchangeFeatureAsync(byte[] command, int session, CancellationToken cancellationToken)
+    private async Task<byte[]?> ExchangeFeatureAsync(
+        byte[] command,
+        int session,
+        CancellationToken cancellationToken,
+        Func<byte[], bool>? isExpectedResponse = null)
     {
         lock (_featureLock)
         {
@@ -120,13 +133,31 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                 return null;
             Connection.SetFeatureReport(command);
         }
-        await Task.Delay(FeatureResponseDelayMilliseconds, cancellationToken).ConfigureAwait(false);
-        lock (_featureLock)
+
+        for (int attempt = 0; attempt < FeatureResponseAttempts; attempt++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return session == _session && IsConnected ? Connection.GetFeatureReport(FeatureReportId) : null;
+            await Task.Delay(FeatureResponseDelayMilliseconds, cancellationToken).ConfigureAwait(false);
+
+            byte[]? response;
+            lock (_featureLock)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                response = session == _session && IsConnected
+                    ? Connection.GetFeatureReport(FeatureReportId)
+                    : null;
+            }
+
+            if (response == null || isExpectedResponse == null || isExpectedResponse(response))
+                return response;
         }
+
+        return null;
     }
+
+    private static bool IsBatteryResponse(byte[] response) =>
+        response.Length > 2 &&
+        response[1] == BatteryResponseType &&
+        response[2] == BatteryResponseCommand;
 
     private void ApplySample(int battery, byte charge)
     {
