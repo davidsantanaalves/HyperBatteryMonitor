@@ -66,6 +66,12 @@ public sealed class HyperXDeviceManager : IDisposable
             },
             new()
             {
+                Definition = CloudStingerCoreWirelessDevice.PlayStationDefinition,
+                Factory = () => new CloudStingerCoreWirelessDevice(
+                    CloudStingerCoreWirelessDevice.PlayStationDefinition)
+            },
+            new()
+            {
                 Definition = Cloud3WirelessAlternateReceiverDevice.Definition,
                 Factory = () => new Cloud3WirelessAlternateReceiverDevice()
             },
@@ -320,7 +326,7 @@ public sealed class HyperXDeviceManager : IDisposable
         SupportedDevices.Where(item =>
             ReceiverFamilies[model].Contains(item.Definition.Name, StringComparer.OrdinalIgnoreCase)).ToArray();
 
-    // Only the four models with documented receiver variants are consolidated.
+    // Only models with documented receiver variants are consolidated.
     // Entries in SupportedDevices retain their exact original registrations/factories.
     private static readonly IReadOnlyDictionary<string, string[]> ReceiverFamilies =
         new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
@@ -344,6 +350,11 @@ public sealed class HyperXDeviceManager : IDisposable
                 "HyperX Cloud Stinger 3 Wireless (PC)",
                 "HyperX Cloud Stinger 3 Wireless (PlayStation)",
                 "HyperX Cloud Stinger 3 Wireless (Xbox)"
+            },
+            ["HyperX Cloud Stinger Core Wireless + 7.1"] = new[]
+            {
+                "HyperX Cloud Stinger Core Wireless + 7.1",
+                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)"
             }
         };
 

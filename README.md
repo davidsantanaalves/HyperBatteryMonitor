@@ -87,7 +87,7 @@ The same information is also available from the system tray context menu and too
 
 ## Supported Devices
 
-Ten established headset models and nine additional receiver/model variants are registered in version 2.4.0. The additional variants below are based on NGENUITY 3.1.0 static protocol research and require real-device validation during Beta testing.
+Ten established headset models and ten additional receiver/model variants are registered in version 2.4.0. The additional variants below are based on NGENUITY 3.1.0 static protocol research and require real-device validation during Beta testing.
 
 ### Feature availability
 
@@ -100,7 +100,7 @@ Ten established headset models and nine additional receiver/model variants are r
 | HyperX Cloud Stinger 2 | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight S | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight Wireless | ✅ | ✅ | ⛔ |
-| HyperX Cloud Stinger Core Wireless + 7.1 | ✅ | ✅ | ⛔ |
+| HyperX Cloud Stinger Core Wireless + 7.1 (original and PlayStation receivers) | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight 2 **(Dedicated Dongle)** | ✅ | ✅ | ✅ |
 | HyperX Cloud Mix 2 | ✅ | ⛔ | ✅ |
 | HyperX Cloud III (Receiver 0FCC) | ✅ | ✅ | ✅ |
@@ -114,6 +114,8 @@ Ten established headset models and nine additional receiver/model variants are r
 | HyperX Cloud Flight 2 (TIO - Three-In-One) | ✅ | ✅ | ✅ |
 
 **Existing dedicated-dongle drivers remain unchanged.** Separate entries are provided for new dedicated receivers and for the Cloud III S / Cloud Flight 2 through the HyperX Three-In-One (TIO) receiver. TIO models are resolved through the shared receiver slot table and monitored one at a time. Other TIO child models are not included. The initial hardware validation of these additions is pending; report incompatibilities through the issue tracker.
+
+**Cloud Stinger Core Wireless for PlayStation (SKU 4P5J1AA):** the original USB receiver `03F0:0A93`, revision `4103`, uses HID `MI_03&Col03` (Usage Page `FF00`, Usage `0001`). This receiver is monitored under the existing **Cloud Stinger Core Wireless + 7.1** device selection and is resolved using the adaptive HID discovery introduced in Beta 4. Battery responses `FF 12 05` are validated and stale `FF 01 00` replies are retried **only** for this PlayStation receiver; the original `0951:170B` protocol remains unchanged. Charging, reconnect and Auto Detect were exercised by the contributor; the new HBM integration still requires its own hardware validation. **Battery percentage may be overestimated during charging**, since the existing voltage interpolation curves have not been calibrated for this receiver revision.
 
 Cloud Mix 2 supports battery and microphone mute monitoring over its USB receiver; charging-state monitoring is unavailable.
 
@@ -340,6 +342,10 @@ You can also support the project via PIX:
 ## Contributing
 
 Suggestions, bug reports, and contributions are welcome.
+
+### Community acknowledgements
+
+- **Contributor to [PR #6](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/6)** — thank you for identifying the **HyperX Cloud Stinger Core Wireless for PlayStation (4P5J1AA / `03F0:0A93`)** control endpoint, sharing 52 battery-query diagnostic results, establishing the receiver-specific `FF 12 05` response validation/retry behavior, and checking charging and reconnection scenarios. This implementation was independently integrated into the Beta 5 codebase without merging the PR; your testing and research made the additional receiver support possible.
 
 If you find a problem or have an idea for a new feature, please open an **Issue** in this repository.
 
