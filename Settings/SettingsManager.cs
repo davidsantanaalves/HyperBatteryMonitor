@@ -330,8 +330,61 @@ public sealed class SettingsManager
 
     private static void DeleteDirectoryIfExists(string path)
     {
-        if (Directory.Exists(path))
-            Directory.Delete(path, recursive: true);
+        // Directory.Exists returns false for certain access-denied errors.
+        // Reading attributes distinguishes a missing directory from a directory
+        // that exists but cannot be inspected by the current user.
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return;
+        }
+
+        if ((attributes & FileAttributes.Directory) == 0 ||
+            (attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new IOException(
+                $"Refusing to delete unexpected or reparse-point user data path: '{path}'.");
+        }
+
+        // Background processes can briefly hold the settings/history files.
+        // Retry transient sharing violations, but never silently ignore a
+        // persistent I/O or permissions failure.
+        const int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+
+                if (Directory.Exists(path))
+                    throw new IOException($"Directory still exists after deletion: '{path}'.");
+
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // Another process removed the directory after our initial check.
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                System.Threading.Thread.Sleep(200 * attempt);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    $"Could not complete user data removal at '{path}' " +
+                    $"(attempt {attempt}/{maxAttempts}).", ex);
+            }
+        }
     }
 
     private BatteryHistoryData ResetBatteryHistory()

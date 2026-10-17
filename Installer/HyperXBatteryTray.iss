@@ -149,20 +149,31 @@ function ExecuteMaintenanceArgument(
   const ErrorMessage: String): Boolean;
 var
   ResultCode: Integer;
+  Launched: Boolean;
 begin
   ResultCode := -1;
 
-  Result := ExecAsOriginalUser(
+  Launched := ExecAsOriginalUser(
     ExpandConstant('{app}\{#MyAppExeName}'),
     Argument,
     ExpandConstant('{app}'),
     SW_HIDE,
     ewWaitUntilTerminated,
-    ResultCode) and
-    (ResultCode = 0);
+    ResultCode);
 
+  if not Launched then
+  begin
+    Log('Unable to start the maintenance process as the original user. ' +
+      'Argument: ' + Argument + '. ' + ErrorMessage);
+    Result := False;
+    Exit;
+  end;
+
+  Result := ResultCode = 0;
   if not Result then
-    Log(ErrorMessage + ' Exit code: ' + IntToStr(ResultCode));
+    Log(ErrorMessage + ' Maintenance process exit code: ' +
+      IntToStr(ResultCode) +
+      '. Check the original user TEMP\HBM-Maintenance.log for the .NET exception.');
 end;
 
 function IsSafePreviousInstallDirectory: Boolean;
