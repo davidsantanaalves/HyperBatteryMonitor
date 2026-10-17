@@ -30,6 +30,9 @@
       <_Parameter1>HBMBetaNumber</_Parameter1>
       <_Parameter2>$(BetaNumber)</_Parameter2>
     </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>HyperBatteryMonitor.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <!-- Evaluate the regular expression outside Condition to avoid nested MSBuild condition quotes. -->
@@ -44,6 +47,7 @@
 
   <ItemGroup>
     <None Remove="Languages\*.json" />
+    <Compile Remove="Tests\**\*.cs" />
     <EmbeddedResource Include="Languages\*.json">
       <LogicalName>HyperXBatteryTray.Languages.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>

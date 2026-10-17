@@ -88,7 +88,9 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                     BatteryCommand,
                     session,
                     cancellationToken,
-                    IsBatteryResponse)
+                    ShouldValidateBatteryResponse(Connection.DevicePath)
+                        ? IsBatteryResponse
+                        : null)
                 .ConfigureAwait(false);
             if (report == null || report.Length < VoltageIndex + VoltageByteCount)
                 return null;
@@ -154,10 +156,15 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
         return null;
     }
 
-    private static bool IsBatteryResponse(byte[] response) =>
+    internal static bool IsBatteryResponse(byte[] response) =>
         response.Length > 2 &&
         response[1] == BatteryResponseType &&
         response[2] == BatteryResponseCommand;
+
+    internal static bool ShouldValidateBatteryResponse(string? devicePath) =>
+        devicePath?.Contains(
+            HpPlayStationControlInterface,
+            StringComparison.OrdinalIgnoreCase) == true;
 
     private void ApplySample(int battery, byte charge)
     {
