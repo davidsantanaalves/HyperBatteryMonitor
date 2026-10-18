@@ -360,6 +360,12 @@ Special thanks to the following people and projects for their contributions to t
 
 - [@pvpiv](https://github.com/pvpiv) — for [PR #6](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/6): identification of the Cloud Stinger Core Wireless PlayStation receiver, HID descriptors, 52 battery-query diagnostic samples, response/retry findings, and real-hardware confirmation of detection and reconnection. The contribution was incorporated locally without merging the PR.
 
+- Buda1973 — for helping identify the Cloud III S Wireless receiver and its HID descriptors, as well as validating device detection and reconnection on real hardware.
+
+- Ordinary_Raise_59 — for helping identify the Cloud Stinger 3 Wireless receiver and its HID descriptors, as well as validating device detection and reconnection on real hardware.
+
+And a special thanks to everyone who has been testing the app, showing their support, and sharing feedback, criticism, and suggestions.
+
 # Downloads
 
 ## Last Stable release:
