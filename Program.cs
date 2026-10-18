@@ -64,10 +64,11 @@ internal static class Program
     {
         string operation = reset ? "Clean installation" : "User data migration";
 
+        bool lockedInstallerPendingCleanup = false;
         try
         {
             if (reset)
-                settingsManager.DeleteUserData();
+                lockedInstallerPendingCleanup = settingsManager.DeleteUserData();
             else
                 settingsManager.MigrateLegacyUserData();
         }
@@ -77,6 +78,15 @@ internal static class Program
             // the profile directories that a clean installation removes.
             WriteMaintenanceLog($"{operation} failed", ex);
             return 1;
+        }
+
+        if (lockedInstallerPendingCleanup)
+        {
+            // The active Beta 5-style Setup executable cannot be deleted while
+            // Windows is running it. The profile contains no settings or history;
+            // the orphaned setup file will be retried during normal app startup.
+            WriteMaintenanceLog("Clean installation removed all user data; " +
+                "the currently running cached installer is awaiting cleanup", null);
         }
 
         // Startup registration is independent of the data reset/migration.
@@ -95,7 +105,7 @@ internal static class Program
         return 0;
     }
 
-    private static void WriteMaintenanceLog(string message, Exception exception)
+    private static void WriteMaintenanceLog(string message, Exception? exception)
     {
         Debug.WriteLine($"{message}: {exception}");
 
@@ -115,7 +125,8 @@ internal static class Program
 
             File.AppendAllText(logPath,
                 $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}" +
-                $"{exception}{Environment.NewLine}{Environment.NewLine}");
+                (exception is null ? string.Empty : $"{exception}{Environment.NewLine}") +
+                Environment.NewLine);
         }
         catch (Exception logFailure)
         {

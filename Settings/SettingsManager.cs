@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using HyperXBatteryTray.Devices;
 using HyperXBatteryTray.Updates;
@@ -223,18 +224,124 @@ public sealed class SettingsManager
         }
     }
 
-    public void DeleteUserData()
+    /// <summary>
+    /// Removes current and legacy user profiles. Returns true only when an active,
+    /// version-matched Inno installer in the old update cache remains temporarily
+    /// locked by Windows. All other user data must still have been removed.
+    /// </summary>
+    public bool DeleteUserData()
     {
-        DeleteDirectoryIfExists(_settingsDirectory);
-        if (ApplicationRuntime.IsTestMode)
-            return; // Never delete production/legacy user data from the test profile.
-
-        if (!PathsEqual(
-                _legacySettingsDirectory,
-                _settingsDirectory))
+        bool lockedInstallerPendingCleanup = false;
+        try
         {
-            DeleteDirectoryIfExists(_legacySettingsDirectory);
+            DeleteDirectoryIfExists(_settingsDirectory);
         }
+        catch (IOException)
+        {
+            // Beta 5 launched Setup directly from this cache. Windows holds the
+            // running .exe open until Setup exits. Never suppress any unrelated
+            // deletion failure, and never preserve settings or battery history.
+            bool? recovered = TryRemoveProfileExceptActiveInstaller();
+            if (!recovered.HasValue)
+                throw;
+            lockedInstallerPendingCleanup = recovered.Value;
+        }
+
+        if (ApplicationRuntime.IsTestMode)
+            return lockedInstallerPendingCleanup;
+
+        if (!PathsEqual(_legacySettingsDirectory, _settingsDirectory))
+            DeleteDirectoryIfExists(_legacySettingsDirectory);
+
+        return lockedInstallerPendingCleanup;
+    }
+
+    // null: not a recognized cached installer; false: fully removed after retry;
+    // true: only the running, locked setup file remains.
+    private bool? TryRemoveProfileExceptActiveInstaller()
+    {
+        // Only the exact setup file for the version being installed may survive.
+        // Do not allow an arbitrary executable or user-supplied file to bypass
+        // Clean Installation. InformationalVersion is embedded at build time.
+        string? versionText = typeof(SettingsManager).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        if (!ReleaseVersion.TryParse(versionText, out ReleaseVersion version))
+            return null;
+
+        string cacheDir = Path.Combine(_settingsDirectory, "Updates");
+        string installer = Path.Combine(cacheDir, UpdateStateStore.GetInstallerFileName(version));
+        if (!Directory.Exists(cacheDir) || !File.Exists(installer))
+            return null;
+
+        // This fallback is never allowed through directory links/junctions or
+        // reparse-point files, even if they appear to have the correct names.
+        FileAttributes rootAttributes = File.GetAttributes(_settingsDirectory);
+        FileAttributes cacheAttributes = File.GetAttributes(cacheDir);
+        FileAttributes installerAttributes = File.GetAttributes(installer);
+        if ((rootAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) !=
+                FileAttributes.Directory ||
+            (cacheAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) !=
+                FileAttributes.Directory ||
+            (installerAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            return null;
+
+        // Only ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION justify keeping
+        // this one .exe; permissions problems and all other I/O errors still fail.
+        try
+        {
+            File.Delete(installer);
+            DeleteDirectoryIfExists(_settingsDirectory);
+            return false; // The installer was removable: no deferred residue.
+        }
+        catch (IOException ex) when ((ex.HResult & 0xFFFF) is 32 or 33)
+        {
+            // Expected for an Inno Setup executable still running from cache.
+        }
+
+        foreach (string entry in Directory.EnumerateFileSystemEntries(_settingsDirectory).ToArray())
+        {
+            if (PathsEqual(entry, cacheDir))
+            {
+                foreach (string cachedEntry in Directory.EnumerateFileSystemEntries(cacheDir).ToArray())
+                {
+                    if (PathsEqual(cachedEntry, installer))
+                        continue;
+
+                    DeleteProfileEntry(cachedEntry);
+                }
+            }
+            else
+            {
+                DeleteProfileEntry(entry);
+            }
+        }
+
+        // Verify that the locked, exact-version installer is literally the only
+        // remaining entry. A partial clean must never be reported as success.
+        string[] rootEntries = Directory.GetFileSystemEntries(_settingsDirectory);
+        string[] cacheEntries = Directory.GetFileSystemEntries(cacheDir);
+        if (rootEntries.Length != 1 || !PathsEqual(rootEntries[0], cacheDir) ||
+            cacheEntries.Length != 1 || !PathsEqual(cacheEntries[0], installer) ||
+            !File.Exists(installer))
+        {
+            throw new IOException(
+                "Clean installation left unexpected files beyond the running installer.");
+        }
+
+        return true;
+    }
+
+    private static void DeleteProfileEntry(string path)
+    {
+        FileAttributes attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+            throw new IOException($"Refusing to follow a reparse point during profile cleanup: '{path}'.");
+
+        if ((attributes & FileAttributes.Directory) != 0)
+            DeleteDirectoryIfExists(path);
+        else
+            File.Delete(path);
     }
 
     private static void MigrateJsonFile(

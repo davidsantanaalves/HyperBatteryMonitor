@@ -74,6 +74,45 @@ internal sealed class UpdateStateStore
         catch (UnauthorizedAccessException) { }
     }
 
+    /// <summary>
+    /// Removes a prior version's cached Setup executable left behind by a clean
+    /// installation started by the Beta 5 updater. Only runs without persisted
+    /// update metadata; a currently running installer may stay locked until the
+    /// next launch. Unrelated files and valid downloads are never touched.
+    /// </summary>
+    internal void CleanupOrphanedInstallersAfterCleanInstall()
+    {
+        try
+        {
+            if (File.Exists(_stateFile) || !Directory.Exists(_cacheDirectory) ||
+                (File.GetAttributes(_cacheDirectory) & FileAttributes.ReparsePoint) != 0)
+                return;
+
+            foreach (string file in Directory.EnumerateFiles(_cacheDirectory,
+                         InstallerPrefix + "*" + InstallerSuffix, SearchOption.TopDirectoryOnly))
+            {
+                string name = Path.GetFileName(file);
+                if (!name.StartsWith(InstallerPrefix, StringComparison.Ordinal) ||
+                    !name.EndsWith(InstallerSuffix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string versionText = name.Substring(InstallerPrefix.Length,
+                    name.Length - InstallerPrefix.Length - InstallerSuffix.Length);
+                if (!ReleaseVersion.TryParse(versionText, out ReleaseVersion version) ||
+                    !string.Equals(name, GetInstallerFileName(version), StringComparison.Ordinal) ||
+                    (File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+                    continue;
+
+                TryDeleteFile(file); // In-use Setup files remain until a later run.
+            }
+
+            if (!Directory.EnumerateFileSystemEntries(_cacheDirectory).Any())
+                Directory.Delete(_cacheDirectory);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     internal static string GetInstallerFileName(ReleaseVersion version) =>
         InstallerPrefix + version + InstallerSuffix;
 
@@ -202,7 +241,9 @@ internal sealed class UpdateStateStore
             return null;
 
         _ = ReleaseVersion.TryParse(update.Tag, out ReleaseVersion cachedVersion);
-        if (!UpdateChannelPolicy.IsEligibleTarget(installed, cachedVersion, channel))
+        if (cachedVersion.CompareTo(installed) <= 0 ||
+            (channel == UpdateChannel.Stable && cachedVersion.IsPrerelease) ||
+            (cachedVersion.IsPrerelease && !IsBeta(cachedVersion)))
         {
             DiscardIfCurrent(update);
             return null;
@@ -312,6 +353,9 @@ internal sealed class UpdateStateStore
         return true;
     }
 
+    private static bool IsBeta(ReleaseVersion version) =>
+        version.Prerelease is "beta" ||
+        (version.Prerelease?.StartsWith("beta.", StringComparison.Ordinal) ?? false);
 
     private static void TryDeleteFile(string path)
     {

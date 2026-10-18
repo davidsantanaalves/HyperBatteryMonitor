@@ -90,6 +90,8 @@ internal sealed class UpdateCoordinator : IDisposable
         _started = true;
         // Remove incomplete transfer files left by a previous hard termination.
         _store.CleanupAbandonedDownloads();
+        // Beta 6: remove abandoned installer files left by the previous updater after clean installation.
+        _store.CleanupOrphanedInstallersAfterCleanInstall();
         _checkTimer?.Change(CheckInterval, CheckInterval);
         _ = CheckAsync(false, startup: true);
     }
@@ -256,7 +258,7 @@ internal sealed class UpdateCoordinator : IDisposable
     /// </summary>
     internal async Task<VerifiedInstaller?> PrepareInstallationAsync()
     {
-        if (_disposed || _storeManaged || ApplicationRuntime.IsTestMode)
+        if (_disposed || _storeManaged || !ApplicationRuntime.CanInstallUpdates)
             return null;
         try { await _operationGate.WaitAsync(_lifetimeToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { return null; }

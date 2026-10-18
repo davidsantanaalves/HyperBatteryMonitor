@@ -1463,7 +1463,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     }
     private async Task<bool> InstallDownloadedUpdateAsync()
     {
-        if (ApplicationRuntime.IsTestMode)
+        if (!ApplicationRuntime.CanInstallUpdates)
             return false;
 
         VerifiedInstaller? installer = await _updateCoordinator.PrepareInstallationAsync();

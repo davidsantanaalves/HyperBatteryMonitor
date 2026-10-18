@@ -13,25 +13,39 @@ internal enum ApplicationMode
 internal static class ApplicationRuntime
 {
     private const string TestArgument = "--test";
+    private const string AllowInstallArgument = "--allowinstall";
     private const string NormalUserDataDirectoryName = "Hyper Battery Monitor";
 #if DEBUG
     private const string TestUserDataDirectoryName = "Hyper Battery Monitor Test";
     private static ApplicationMode _mode = ApplicationMode.Normal;
+    private static bool _testInstallationEnabled;
     internal static bool IsTestMode => _mode == ApplicationMode.Test;
+    internal static bool IsTestInstallationEnabled => IsTestMode && _testInstallationEnabled;
 #else
     internal static bool IsTestMode => false;
+    internal static bool IsTestInstallationEnabled => false;
 #endif
+
+    // In production, installation remains enabled. In test mode it requires
+    // BOTH command-line flags and a Debug build.
+    internal static bool CanInstallUpdates => !IsTestMode || IsTestInstallationEnabled;
 
     internal static bool Configure(string[] arguments)
     {
         bool requested = arguments.Any(arg =>
             string.Equals(arg, TestArgument, StringComparison.OrdinalIgnoreCase));
+        bool allowInstall = arguments.Any(arg =>
+            string.Equals(arg, AllowInstallArgument, StringComparison.OrdinalIgnoreCase));
 #if DEBUG
+        // Never allow --allowinstall on its own: it must not change production mode.
+        if (allowInstall && !requested)
+            return false;
         _mode = requested ? ApplicationMode.Test : ApplicationMode.Normal;
+        _testInstallationEnabled = requested && allowInstall;
         return true;
 #else
-        // Never silently treat --test as a production run: the caller must stop.
-        return !requested;
+        // Release builds cannot enable the test feed or the test installer.
+        return !requested && !allowInstall;
 #endif
     }
 

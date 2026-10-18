@@ -211,7 +211,7 @@ public sealed partial class SettingsForm
 
     private async Task InstallUpdateFromAboutAsync()
     {
-        if (ApplicationRuntime.IsTestMode || _installLaunchInProgress ||
+        if (!ApplicationRuntime.CanInstallUpdates || _installLaunchInProgress ||
             _installDownloadedUpdateAsync is null ||
             _updateCoordinator is null || _updateCoordinator.IsStoreManaged ||
             _pendingUpdateChannel != _settings.UpdateChannel ||
@@ -229,6 +229,21 @@ public sealed partial class SettingsForm
         {
             _updateCoordinator.RemindLater();
             RefreshUpdatesUi();
+            return;
+        }
+
+        // --test --allowinstall permits a real Inno Setup run. The release
+        // comes from the test feed, but Setup still uses the production AppId.
+        if (ApplicationRuntime.IsTestInstallationEnabled &&
+            MessageBox.Show(this,
+                "This is a REAL Windows installation using an asset from the HBM TEST repository. " +
+                "The installer may replace your installed Hyper Battery Monitor. " +
+                "Selecting Clean Installation in Setup will delete production settings and battery history. " +
+                "Back up your data before proceeding. Continue?",
+                "TEST MODE - REAL INSTALLATION",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        {
             return;
         }
 
@@ -444,7 +459,7 @@ public sealed partial class SettingsForm
         if (_updatesInstallButton is { IsDisposed: false })
         {
             _updatesInstallButton.Visible = snapshot.Status is UpdateStatus.Downloaded or UpdateStatus.InstallationFailed;
-            _updatesInstallButton.Enabled = !ApplicationRuntime.IsTestMode &&
+            _updatesInstallButton.Enabled = ApplicationRuntime.CanInstallUpdates &&
                 !pendingChanged && !_installLaunchInProgress &&
                 _installDownloadedUpdateAsync is not null;
         }
