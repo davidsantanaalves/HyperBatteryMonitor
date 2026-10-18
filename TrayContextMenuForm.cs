@@ -87,7 +87,8 @@ internal sealed class TrayContextMenuForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         ClientSize = new Size(MenuLogicalWidth, MenuLogicalHeight);
-        TopMost = true;
+        // ShowAt() activates this menu on demand; when focus is lost it hides.
+        // It does not need to stay above unrelated applications.
         DoubleBuffered = true;
         Padding = new Padding(0);
         BackColor = Color.FromArgb(45, 48, 51);
@@ -245,7 +246,7 @@ internal sealed class TrayContextMenuForm : Form
         SetDeviceImage(imageFile);
 
         _deviceName.Text = selected
-            ? Localization.DeviceDisplayName(normalized, _settings.Language)
+            ? Localization.DeviceDisplayName(HyperXDeviceManager.GetSelectionModelName(normalized), _settings.Language)
             : Localization.Get("UnknownHeadphones", _settings.Language);
         _statusText.Text = connected ? Localization.Get("Connected", _settings.Language) : selected ? Localization.Get("Disconnected", _settings.Language) : Localization.Get("SidebarUnknown", _settings.Language);
         _statusDot.Connected = connected;
@@ -454,13 +455,10 @@ internal sealed class TrayContextMenuForm : Form
         _microphoneBitmap?.Dispose();
         _microphoneBitmap = null;
 
-        string themeDirectory = dark ? "Dark" : "Light";
         string themePrefix = dark ? "dark" : "light";
         string iconName = useMuteIcon ? MicrophoneMutedIconAssetName : MicrophoneOpenIconAssetName;
-        string path = Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            themeDirectory,
+        string path = AssetPaths.GetThemeIconPath(
+            dark,
             $"{themePrefix}_{iconName}-{MicrophoneIconLogicalSize}x{MicrophoneIconLogicalSize}.png");
 
         if (File.Exists(path))
@@ -491,7 +489,7 @@ internal sealed class TrayContextMenuForm : Form
             return;
         }
 
-        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Devices", fileName);
+        string path = AssetPaths.GetDeviceImagePath(fileName);
         // Detach the current image before disposing its bitmap. PictureBox can
         // access Image during layout/paint, and keeping a disposed bitmap
         // assigned to Image can result in "Parameter is not valid" exceptions.
@@ -526,6 +524,16 @@ internal sealed class TrayContextMenuForm : Form
         "HyperX Cloud Stinger Core Wireless + 7.1" => "cloudstingercorewireless7.1.png",
         "HyperX Cloud Flight 2" => "cloudflight2.png",
         "HyperX Cloud Mix 2" => "cloudmix2.png",
+        "HyperX Cloud Alpha 2 Wireless" => "cloudalpha2.png",
+        "HyperX Cloud Stinger 3 Wireless" => "cloudstinger3.png",
+        "HyperX Cloud III (Receiver 0FCC)" => "cloud3.png",
+        "HyperX Cloud III S (Receiver 02CC)" => "cloud3.png",
+        "HyperX Cloud III S (TIO - Three-In-One)" => "cloud3.png",
+        "HyperX Cloud Flight 2 (Xbox)" => "cloudflight2.png",
+        "HyperX Cloud Flight 2 (TIO - Three-In-One)" => "cloudflight2.png",
+        "HyperX Cloud Stinger 3 Wireless (PC)" => "cloudstinger3.png",
+        "HyperX Cloud Stinger 3 Wireless (PlayStation)" => "cloudstinger3.png",
+        "HyperX Cloud Stinger 3 Wireless (Xbox)" => "cloudstinger3.png",
         _ => "unknown-device.png"
     };
 

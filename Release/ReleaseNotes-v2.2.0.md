@@ -16,4 +16,4 @@
 
 The supported headset lineup is unchanged. Microphone mute monitoring remains unavailable for Cloud Stinger 2.
 
-**Full Changelog**: https://github.com/davidsantanaalves/HyperXBatteryMonitor/compare/v2.1.1...v2.2.0
+**Full Changelog**: https://github.com/davidsantanaalves/HyperBatteryMonitor/compare/v2.1.1...v2.2.0

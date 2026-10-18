@@ -28,7 +28,7 @@ public sealed partial class SettingsForm : Form
             MaximizeBox = false;
             ShowInTaskbar = false;
             ShowIcon = false;
-            TopMost = true;
+            // ShowDialog(settingsForm) keeps this modal above its owner only.
             DoubleBuffered = true;
 
             BackColor = dark ? DarkBackground : Color.White;

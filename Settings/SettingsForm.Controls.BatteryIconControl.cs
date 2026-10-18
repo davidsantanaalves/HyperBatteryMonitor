@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -47,15 +48,15 @@ public sealed partial class SettingsForm : Form
         {
             DisposeTemplate(ref _darkTemplate);
             DisposeTemplate(ref _lightTemplate);
-            _darkTemplate = LoadTemplate("Dark", "battery-dark-46x46.png");
-            _lightTemplate = LoadTemplate("Light", "battery-light-46x46.png");
+            _darkTemplate = LoadTemplate(true, "battery-dark-46x46.png");
+            _lightTemplate = LoadTemplate(false, "battery-light-46x46.png");
         }
 
-        private static Bitmap? LoadTemplate(string themeFolder, string fileName)
+        private static Bitmap? LoadTemplate(bool darkMode, string fileName)
         {
             try
             {
-                string filePath = Path.Combine(AppContext.BaseDirectory, "Icons", themeFolder, fileName);
+                string filePath = AssetPaths.GetThemeIconPath(darkMode, fileName);
                 if (!File.Exists(filePath))
                     return null;
 

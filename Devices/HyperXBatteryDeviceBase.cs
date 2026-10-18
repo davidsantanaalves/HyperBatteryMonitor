@@ -2,11 +2,15 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public abstract class HyperXBatteryDeviceBase : IHyperXDevice
+public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint
 {
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(2);
 
     private readonly HidConnection _connection = new();
+    private string? _selectedHidEndpoint;
+
+    void ISelectableHidEndpoint.SelectHidEndpoint(string path) =>
+        _selectedHidEndpoint = path;
     private readonly object _batteryRequestLock = new();
     private readonly object _chargeStatusRequestLock = new();
     private readonly object _microphoneMuteRequestLock = new();
@@ -69,7 +73,7 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice
         if (_isConnected)
             return true;
 
-        string? devicePath = HidConnection.FindDevice(Definition);
+        string? devicePath = _selectedHidEndpoint ?? HidConnection.FindDevice(Definition);
 
         if (string.IsNullOrWhiteSpace(devicePath))
             return false;

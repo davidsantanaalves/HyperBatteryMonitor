@@ -8,8 +8,8 @@ The application provides a convenient way to monitor your headset directly from 
 
 * 🔋 Battery level monitoring directly from the Windows system tray
 * ⏳ Estimated remaining battery time with locally saved discharge history per headset model
-* 🎧 Support for 10 HyperX wireless headset models
-* 🔎 Automatic detection of supported HyperX devices
+* 🎧 Expanded HyperX headset and receiver compatibility, including supported PlayStation, Xbox, and TIO variants
+* 🔎 Automatic detection of supported HyperX devices with adaptive HID interface validation
 * 📊 Multiple battery display modes
 * 🎨 Customizable battery indicator colors and thresholds
 * 🌈 Optional battery color gradient
@@ -28,27 +28,26 @@ The application provides a convenient way to monitor your headset directly from 
 * ⚙️ Dedicated and responsive Settings interface
 * 🖥️ High-DPI-aware interface with improved scaling and text wrapping
 * 💾 Persistent application settings and battery history
+* 🔄 In-app updates with selectable Stable/Beta channels and built-in release notes
+* 🔵 Windows Bluetooth battery fallback on selected headset models when Windows provides a valid battery level
 * 🔄 Automatic migration of settings and battery history from previous versions
-* 🧹 Optional clean installation
+* 🧹 Optional clean installation, with improved handling of in-app installer staging
 * 🖼️ Custom application, device, notification, and system tray icons
 * 🪟 Native Windows / Windows Forms interface
 * 🚀 Lightweight and designed to run continuously in the background
 
-## What's New in Version 2.3.1
+## What's New in Version 2.4.0
 
-* **New product name:** HyperX Battery Monitor is now **Hyper Battery Monitor**, with updated application branding and installation paths.
-* **Seamless migration:** existing settings and battery history from previous versions are automatically migrated to the new application data location.
-* **Improved installation experience:** the installer now handles the renamed application, legacy installation paths, running-process detection, startup migration, and cleanup of obsolete shortcuts and startup entries.
-* **Optional clean installation:** users can choose to start with a fresh profile instead of preserving previous settings and history.
-* **Expanded localization:** the interface is now available in **11 languages** — English, Portuguese (Brazil), Spanish, Ukrainian, German, French, Polish, Russian, Simplified Chinese, Japanese, and Korean.
-* **Automatic language detection:** new installations automatically select the Windows display language when supported.
-* **New localization system:** application translations were moved to embedded JSON language catalogs, with English fallback and validation for localized format strings.
-* **Improved Settings interface:** multiple pages and dialogs were refined for better responsiveness, text wrapping, localization, and high-DPI scaling.
-* **Simplified Battery section:** the Battery Monitor section is now presented simply as **Battery** in the Settings navigation.
-* **Improved Dynamic Icon Colors:** layout, sizing, painting, and DPI behavior were refined for a more consistent customization experience.
-* **Improved upgrade compatibility:** current and legacy startup registrations, application paths, executable names, and user-data locations are handled during migration.
-* **Cleaner application resources:** obsolete and duplicate visual assets and legacy references were removed or consolidated.
-* **General stability and maintenance improvements:** additional cleanup and compatibility work was completed in preparation for the stable 2.3.1 release.
+Version 2.4.0 consolidates the changes from the 2.4.0 beta series, expanding HyperX headset/receiver compatibility and improving detection, update delivery, and installation reliability.
+
+* **Expanded receiver compatibility:** additional Cloud III / Cloud III S receivers, Cloud Alpha 2 Wireless, Cloud Stinger 3 Wireless (PC, PlayStation, Xbox), Cloud Flight 2 (Xbox), and supported Cloud III S / Cloud Flight 2 setups using a HyperX Three-In-One (TIO) receiver.
+* **Cloud Stinger Core PlayStation receiver:** support for `03F0:0A93` (`MI_03&Col03`) with receiver-specific battery response validation and retries, preserving the behavior of the original `0951:170B` receiver. This variant was tested successfully by [@pvpiv](https://github.com/pvpiv) ([PR #6](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/6)).
+* **Adaptive HID discovery:** validates candidate control interfaces using battery responses, remembers working interface preferences, and revalidates them after reconnection; also fixes a Windows SetupAPI HID path extraction issue.
+* **Windows Bluetooth fallback:** read-only battery level for selected models when Windows provides a valid battery percentage; working USB/HID reporting takes priority.
+* **Improved updater:** Stable/Beta channels, contextual *See what's new* release notes, themed dialogs, more responsive Auto Detect, and better control over returning to an older Stable release.
+* **Reliable clean installation:** updater stages a validated installer under the current user's `%TEMP%`, away from the user-data directory, and handles an older cached installer that is still running during cleanup. Normal updates preserve settings and history; a selected clean installation removes them.
+
+Some hardware/firmware combinations and Bluetooth/TIO scenarios still need field validation. Battery percentage for the Cloud Stinger Core PlayStation receiver may be overestimated while charging. For more information, see the [v2.4.0 release notes](Release/ReleaseNotes-v2.4.0.md).
 
 ## Headset Status Monitoring
 
@@ -56,7 +55,7 @@ Hyper Battery Monitor displays battery, charging, connection, and supported micr
 
 ### Microphone mute monitoring
 
-Supported headsets can report their microphone mute state directly to HyperX Battery Monitor.
+Supported headsets can report their microphone mute state directly to Hyper Battery Monitor.
 
 The microphone state is displayed in:
 
@@ -80,7 +79,7 @@ Microphone mute monitoring is available on Cloud III Wireless, Cloud III S (Dedi
 
 Charging-state support has been expanded across the supported headset implementations.
 
-When a headset is charging, HyperX Battery Monitor can indicate the charging state through the system tray and device monitoring interface.
+When a headset is charging, Hyper Battery Monitor can indicate the charging state through the system tray and device monitoring interface.
 
 The sidebar and tray menu indicate charging through the battery icon when applicable.
 
@@ -97,7 +96,7 @@ The same information is also available from the system tray context menu and too
 
 ## Supported Devices
 
-Ten headset models are currently supported. Feature availability is shown below.
+Version 2.4.0 retains the ten original headset registrations and adds ten further model/receiver registrations. Some variants are grouped under the same headset name below. Feature availability depends on the receiver, firmware and connection method; not all new variants have been validated on physical hardware.
 
 ### Feature availability
 
@@ -110,11 +109,26 @@ Ten headset models are currently supported. Feature availability is shown below.
 | HyperX Cloud Stinger 2 | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight S | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight Wireless | ✅ | ✅ | ⛔ |
-| HyperX Cloud Stinger Core Wireless + 7.1 | ✅ | ✅ | ⛔ |
+| HyperX Cloud Stinger Core Wireless + 7.1 (original / PlayStation receivers) | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight 2 **(Dedicated Dongle)** | ✅ | ✅ | ✅ |
 | HyperX Cloud Mix 2 | ✅ | ⛔ | ✅ |
+| HyperX Cloud III Wireless (receiver `03F0:0FCC`) | ✅ | ✅ | ✅ |
+| HyperX Cloud III S Wireless (receiver `03F0:02CC`) | ✅ | ✅ | ✅ |
+| HyperX Cloud Alpha 2 Wireless | ✅ | ✅ | ✅ |
+| HyperX Cloud Stinger 3 Wireless (PC) | ✅ | ⚠️¹ | ✅ |
+| HyperX Cloud Stinger 3 Wireless (PlayStation) | ✅ | ⚠️¹ | ✅ |
+| HyperX Cloud Stinger 3 Wireless (Xbox) | ✅ | ⚠️¹ | ✅ |
+| HyperX Cloud Flight 2 (Xbox receiver) | ✅ | ✅ | ✅ |
+| HyperX Cloud III S Wireless (TIO receiver) | ✅ | ✅ | ✅ |
+| HyperX Cloud Flight 2 (TIO receiver) | ✅ | ✅ | ✅ |
 
-**Cloud III S and Cloud Flight 2 require their Dedicated Dongle.** HyperX Three-In-One (TIO) receiver presence is detected only to explain that this connection is not yet supported for monitoring.
+**¹ Cloud Stinger 3 charging state** may depend on supported device notifications. Availability in the matrix indicates an implemented capability, not universal validation of each headset firmware/receiver revision.
+
+**Dedicated dongle and TIO support:** existing Cloud III S and Cloud Flight 2 dedicated-dongle configurations remain supported. Selected Cloud III S and Cloud Flight 2 variants can also be monitored through a compatible HyperX Three-In-One (TIO) receiver, one headset at a time. TIO slot selection and other new hardware combinations may vary by device and firmware.
+
+**Field validation:** Cloud III Wireless operation was checked by the maintainer; a Cloud III S receiver `03F0:02CC` was confirmed working by a tester in Beta 4. A tester also confirmed Cloud Stinger Core PlayStation `03F0:0A93` using the official Beta 5 installer, including detection and recovery after receiver reconnect and headset power-cycle. Battery readings during charging may be overestimated for this PlayStation receiver because its voltage curve has not been calibrated separately.
+
+**Windows Bluetooth battery fallback:** on selected Cloud III S, Cloud Alpha 2, Cloud Flight 2, Cloud Stinger 3 and Cloud MIX 2 configurations, HBM can read battery percentage exposed by Windows. Valid USB/HID values take precedence. Bluetooth-only fallback does not establish microphone mute, charging status or estimated runtime; some headset/adapter combinations do not expose battery percentage.
 
 Cloud Mix 2 supports battery and microphone mute monitoring; charging-state monitoring is unavailable.
 
@@ -160,15 +174,15 @@ These screenshots illustrate earlier versions.
 
 Download the latest version from the **Releases** section of this repository.
 
-Run the installer and follow the installation instructions.
+Run the installer and follow the installation instructions. The Stable 2.4.0 installer is named `HyperBatteryMonitor-Setup-v2.4.0.exe`.
 
-After installation, HyperX Battery Monitor runs in the Windows system tray.
+After installation, Hyper Battery Monitor runs in the Windows system tray.
 
-You can also install HyperX Battery Monitor from the [Microsoft Store](https://apps.microsoft.com/detail/9N4G6WKMM4QJ).
+You can also install Hyper Battery Monitor from the [Microsoft Store](https://apps.microsoft.com/detail/9N4G6WKMM4QJ).
 
 ## Usage
 
-After launching the application, the HyperX Battery Monitor icon will appear in the Windows notification area.
+After launching the application, the Hyper Battery Monitor icon will appear in the Windows notification area.
 
 Right-click the tray icon to access the device status and available options.
 
@@ -197,7 +211,7 @@ Microphone-related options are automatically unavailable for headset models that
 
 ## Battery Monitor Modes
 
-HyperX Battery Monitor provides multiple ways to display battery information in the Windows system tray.
+Hyper Battery Monitor provides multiple ways to display battery information in the Windows system tray.
 
 ### Static icon
 
@@ -221,7 +235,7 @@ Customize battery-level colors and thresholds, with an optional gradient transit
 
 ## Microphone Monitoring
 
-For supported headsets, HyperX Battery Monitor monitors microphone mute-state changes and updates the interface automatically.
+For supported headsets, Hyper Battery Monitor monitors microphone mute-state changes and updates the interface automatically.
 
 The current microphone state can be viewed in:
 
@@ -242,7 +256,7 @@ This feature is enabled by default for headset models that support microphone mu
 
 ## Charging Status
 
-HyperX Battery Monitor monitors charging state on supported devices.
+Hyper Battery Monitor monitors charging state on supported devices.
 
 When charging is detected, the application can:
 
@@ -271,11 +285,11 @@ These options can be configured independently through the Settings window.
 
 ## Project Status
 
-**Version:** 2.3.1
+**Version:** 2.4.0
 
 **Status:** Stable release
 
-Version 2.3.1 supports ten headset models and adds automatic device detection, a revised Device page, and more robust adaptive remaining-time estimates.
+Version 2.4.0 adds adaptive HID endpoint discovery, additional headset/receiver variants, Windows Bluetooth battery fallback on supported models, and more reliable in-app updates and Clean Installation.
 
 The project remains under active development, and additional devices and features may be added in future versions.
 
@@ -316,7 +330,7 @@ Independent developer.
 
 ## Support the Project
 
-If you find HyperX Battery Monitor useful and would like to support its development:
+If you find Hyper Battery Monitor useful and would like to support its development:
 
 ☕ [Buy Me a Coffee](https://buymeacoffee.com/davesantana)
 
@@ -343,6 +357,8 @@ Special thanks to the following people and projects for their contributions to t
 - minoga11 — for active participation in testing and for suggesting new improvements.
 
 - sladkOy — for the suggestion and help with the Ukrainian translation.
+
+- [@pvpiv](https://github.com/pvpiv) — for [PR #6](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/6): identification of the Cloud Stinger Core Wireless PlayStation receiver, HID descriptors, 52 battery-query diagnostic samples, response/retry findings, and real-hardware confirmation of detection and reconnection. The contribution was incorporated locally without merging the PR.
 
 # Downloads
 

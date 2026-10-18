@@ -5,6 +5,8 @@ namespace HyperXBatteryTray.Devices;
 public sealed class HyperXDeviceManager : IDisposable
 {
     private const string ThreeInOneReceiverInterfacePattern = "VID_03F0&PID_01BF";
+    private const string ThreeInOneAlternateReceiverInterfacePattern = "VID_03F0&PID_01C5";
+    private const int OriginalRegistrationCount = 10;
 
     private readonly List<IHyperXDevice> _devices = new();
 
@@ -61,6 +63,57 @@ public sealed class HyperXDeviceManager : IDisposable
             {
                 Definition = CloudMix2Device.DeviceDefinition,
                 Factory = () => new CloudMix2Device()
+            },
+            new()
+            {
+                Definition = CloudStingerCoreWirelessDevice.PlayStationDefinition,
+                Factory = () => new CloudStingerCoreWirelessDevice(
+                    CloudStingerCoreWirelessDevice.PlayStationDefinition)
+            },
+            new()
+            {
+                Definition = Cloud3WirelessAlternateReceiverDevice.Definition,
+                Factory = () => new Cloud3WirelessAlternateReceiverDevice()
+            },
+            new()
+            {
+                Definition = Cloud3SAlternateReceiverDevice.DeviceDefinition,
+                Factory = () => new Cloud3SAlternateReceiverDevice()
+            },
+            new()
+            {
+                Definition = UniversalAdditionalWirelessDevice.Alpha2Definition,
+                Factory = () => new UniversalAdditionalWirelessDevice(UniversalAdditionalWirelessDevice.Alpha2Definition)
+            },
+            new()
+            {
+                Definition = UniversalAdditionalWirelessDevice.Flight2XboxDefinition,
+                Factory = () => new UniversalAdditionalWirelessDevice(UniversalAdditionalWirelessDevice.Flight2XboxDefinition)
+            },
+            new()
+            {
+                Definition = CloudStinger3WirelessDevice.PcDefinition,
+                Factory = () => new CloudStinger3WirelessDevice(CloudStinger3WirelessDevice.PcDefinition)
+            },
+            new()
+            {
+                Definition = CloudStinger3WirelessDevice.PsDefinition,
+                Factory = () => new CloudStinger3WirelessDevice(CloudStinger3WirelessDevice.PsDefinition)
+            },
+            new()
+            {
+                Definition = CloudStinger3WirelessDevice.XboxDefinition,
+                Factory = () => new CloudStinger3WirelessDevice(CloudStinger3WirelessDevice.XboxDefinition)
+            },
+            new()
+            {
+                Definition = UniversalAdditionalWirelessDevice.Cloud3STioDefinition,
+                Factory = () => new UniversalAdditionalWirelessDevice(UniversalAdditionalWirelessDevice.Cloud3STioDefinition, 0x05BE)
+            },
+            new()
+            {
+                Definition = UniversalAdditionalWirelessDevice.Flight2TioDefinition,
+                Factory = () => new UniversalAdditionalWirelessDevice(UniversalAdditionalWirelessDevice.Flight2TioDefinition, 0x0BC1)
             }
         };
 
@@ -97,10 +150,31 @@ public sealed class HyperXDeviceManager : IDisposable
 
     public static IHyperXDevice? CreateDevice(string? selectedDeviceName)
     {
-        HyperXDeviceRegistration? registration =
-            FindRegistration(selectedDeviceName);
+        if (string.IsNullOrWhiteSpace(selectedDeviceName))
+            return null;
 
-        return registration?.Factory();
+        // Explicit historical variants still resolve to their original driver.
+        // A model selected in the current UI gets a receiver-aware dispatcher.
+        if (TryGetReceiverFamily(selectedDeviceName, out string? modelName))
+        {
+            IHyperXDevice receiverDevice = new ReceiverAwareDevice(modelName!, GetReceiverCandidates(modelName!));
+            return BluetoothBatteryProbe.SupportsModel(modelName!)
+                ? new BluetoothFallbackDevice(receiverDevice, modelName!)
+                : receiverDevice;
+        }
+
+        HyperXDeviceRegistration? registration = FindRegistration(selectedDeviceName);
+        if (registration == null)
+            return null;
+        IHyperXDevice device = new ReceiverAwareDevice(registration.Definition.Name,
+            new[] { registration });
+        // Keep the same parser and HID command per registration; only endpoint
+        // resolution and battery validation are shared across all models.
+        string name = registration.Definition.Name;
+        return string.Equals(selectedDeviceName, name, StringComparison.OrdinalIgnoreCase) &&
+               BluetoothBatteryProbe.SupportsModel(name)
+            ? new BluetoothFallbackDevice(device, name)
+            : device;
     }
 
     public static bool IsSameDevice(string? left, string? right)
@@ -109,8 +183,8 @@ public sealed class HyperXDeviceManager : IDisposable
             return string.IsNullOrWhiteSpace(left) && string.IsNullOrWhiteSpace(right);
 
         return string.Equals(
-            NormalizeDeviceName(left),
-            NormalizeDeviceName(right),
+            GetSelectionModelName(left),
+            GetSelectionModelName(right),
             StringComparison.OrdinalIgnoreCase);
     }
 
@@ -120,7 +194,9 @@ public sealed class HyperXDeviceManager : IDisposable
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
 
-        return registration?.Definition.SupportsMicrophoneMuteMonitoring == true;
+        return registration?.Definition.SupportsMicrophoneMuteMonitoring == true ||
+            (TryGetReceiverFamily(selectedDeviceName, out string? group) &&
+                GetReceiverCandidates(group!).Any(candidate => candidate.Definition.SupportsMicrophoneMuteMonitoring));
     }
 
     public static bool SupportsChargingMonitoring(
@@ -129,7 +205,9 @@ public sealed class HyperXDeviceManager : IDisposable
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
 
-        return registration?.Definition.SupportsChargingMonitoring == true;
+        return registration?.Definition.SupportsChargingMonitoring == true ||
+            (TryGetReceiverFamily(selectedDeviceName, out string? group) &&
+                GetReceiverCandidates(group!).Any(candidate => candidate.Definition.SupportsChargingMonitoring));
     }
 
     internal static bool RequiresDedicatedDongle(
@@ -138,47 +216,53 @@ public sealed class HyperXDeviceManager : IDisposable
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
 
+        // Model-level selection can also use a shared Three-In-One receiver.
+        if (TryGetReceiverFamily(selectedDeviceName, out _))
+            return false;
         return registration?.Definition.RequiresDedicatedDongle == true;
     }
 
     public static async Task<IReadOnlyList<string>> ProbeResponsiveDevicesAsync(
         CancellationToken cancellationToken = default)
     {
-        List<string> detectedDevices = new();
+        List<string> detected = new();
+        // Probe model families through the exact same receiver resolver that
+        // normal selection uses. Avoid 19 independent uncoordinated probes.
+        List<(string Model, IReadOnlyList<HyperXDeviceRegistration> Registrations)> searches = new();
+        foreach (string family in ReceiverFamilies.Keys)
+            searches.Add((family, GetReceiverCandidates(family)));
 
         foreach (HyperXDeviceRegistration registration in SupportedDevices)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            string? devicePath = HidConnection.FindDevice(registration.Definition);
-            if (string.IsNullOrWhiteSpace(devicePath))
+            if (ReceiverFamilies.Values.Any(family => family.Contains(
+                    registration.Definition.Name, StringComparer.OrdinalIgnoreCase)))
                 continue;
+            searches.Add((registration.Definition.Name, new[] { registration }));
+        }
 
-            using IHyperXDevice device = registration.Factory();
-
+        foreach (var (model, registrations) in searches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using IHyperXDevice device = new ReceiverAwareDevice(model, registrations);
             try
             {
-                if (!device.Connect())
-                    continue;
-
+                if (!device.Connect()) continue;
                 int? battery = await device.QueryBatteryAsync(cancellationToken)
                     .ConfigureAwait(false);
-
                 if (battery is >= 0 and <= 100)
-                    detectedDevices.Add(registration.Definition.Name);
+                    detected.Add(model);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"Automatic device detection could not probe '{registration.Definition.Name}': {ex.Message}");
+                    $"Automatic device detection could not probe '{model}': {ex.Message}");
             }
         }
-
-        return detectedDevices;
+        return detected;
     }
 
     internal static double? GetNominalBatteryLifeHours(
@@ -187,19 +271,92 @@ public sealed class HyperXDeviceManager : IDisposable
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
 
-        return registration?.Definition.NominalBatteryLifeHours;
+        if (registration != null)
+            return registration.Definition.NominalBatteryLifeHours;
+        return TryGetReceiverFamily(selectedDeviceName, out string? group)
+            ? GetReceiverCandidates(group!).Select(c => c.Definition.NominalBatteryLifeHours).FirstOrDefault(x => x.HasValue)
+            : null;
     }
 
     internal static bool IsSupportedDeviceName(string? selectedDeviceName) =>
-        FindRegistration(selectedDeviceName) != null;
+        FindRegistration(selectedDeviceName) != null ||
+        TryGetReceiverFamily(selectedDeviceName, out _);
 
     internal static bool IsThreeInOneReceiverPresent() =>
         !string.IsNullOrWhiteSpace(
             HidConnection.FindDeviceByInterfacePattern(
-                ThreeInOneReceiverInterfacePattern));
+                ThreeInOneReceiverInterfacePattern)) ||
+        !string.IsNullOrWhiteSpace(
+            HidConnection.FindDeviceByInterfacePattern(
+                ThreeInOneAlternateReceiverInterfacePattern));
 
     internal static string NormalizeSupportedDeviceName(string value) =>
         NormalizeDeviceName(value);
+
+    /// <summary>UI identity only; never rewrites historical persisted variant IDs.</summary>
+    public static string GetSelectionModelName(string? selectedName)
+    {
+        if (string.IsNullOrWhiteSpace(selectedName))
+            return string.Empty;
+        string normalized = NormalizeDeviceName(selectedName);
+        foreach ((string model, string[] variants) in ReceiverFamilies)
+        {
+            if (string.Equals(normalized, model, StringComparison.OrdinalIgnoreCase) ||
+                variants.Any(variant => string.Equals(variant, normalized, StringComparison.OrdinalIgnoreCase)))
+                return model;
+        }
+        return normalized;
+    }
+
+    private static bool TryGetReceiverFamily(string? name, out string? group)
+    {
+        group = null;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        string normalized = NormalizeDeviceName(name);
+        foreach (string model in ReceiverFamilies.Keys)
+        {
+            if (!string.Equals(model, normalized, StringComparison.OrdinalIgnoreCase)) continue;
+            group = model;
+            return true;
+        }
+        return false;
+    }
+
+    private static IReadOnlyList<HyperXDeviceRegistration> GetReceiverCandidates(string model) =>
+        SupportedDevices.Where(item =>
+            ReceiverFamilies[model].Contains(item.Definition.Name, StringComparer.OrdinalIgnoreCase)).ToArray();
+
+    // Only models with documented receiver variants are consolidated.
+    // Entries in SupportedDevices retain their exact original registrations/factories.
+    private static readonly IReadOnlyDictionary<string, string[]> ReceiverFamilies =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HyperX Cloud III"] = new[]
+            {
+                "HyperX Cloud III Wireless", "HyperX Cloud III (Receiver 0FCC)"
+            },
+            ["HyperX Cloud III S"] = new[]
+            {
+                "HyperX Cloud III S", "HyperX Cloud III S (Receiver 02CC)",
+                "HyperX Cloud III S (TIO - Three-In-One)"
+            },
+            ["HyperX Cloud Flight 2"] = new[]
+            {
+                "HyperX Cloud Flight 2", "HyperX Cloud Flight 2 (Xbox)",
+                "HyperX Cloud Flight 2 (TIO - Three-In-One)"
+            },
+            ["HyperX Cloud Stinger 3 Wireless"] = new[]
+            {
+                "HyperX Cloud Stinger 3 Wireless (PC)",
+                "HyperX Cloud Stinger 3 Wireless (PlayStation)",
+                "HyperX Cloud Stinger 3 Wireless (Xbox)"
+            },
+            ["HyperX Cloud Stinger Core Wireless + 7.1"] = new[]
+            {
+                "HyperX Cloud Stinger Core Wireless + 7.1",
+                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)"
+            }
+        };
 
     private static HyperXDeviceRegistration? FindRegistration(
         string? selectedDeviceName)
@@ -219,6 +376,14 @@ public sealed class HyperXDeviceManager : IDisposable
     private static string NormalizeDeviceName(string value)
     {
         string normalized = value.Trim();
+
+        // These labels are distinct registered devices, not legacy display-name suffixes.
+        // In particular, TIO uses the shared receiver and must never select the dedicated driver.
+        if (SupportedDevices.Skip(OriginalRegistrationCount).Any(item => string.Equals(item.Definition.Name, normalized,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return normalized;
+        }
 
         if (string.Equals(
                 normalized,

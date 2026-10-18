@@ -24,9 +24,15 @@
 
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest" />
-    <Content Include="Assets\Square44x44Logo.png" />
-    <Content Include="Assets\Square150x150Logo.png" />
-    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="..\Assets\Packaging\Square44x44Logo.png">
+      <Link>Assets\Square44x44Logo.png</Link>
+    </Content>
+    <Content Include="..\Assets\Packaging\Square150x150Logo.png">
+      <Link>Assets\Square150x150Logo.png</Link>
+    </Content>
+    <Content Include="..\Assets\Packaging\StoreLogo.png">
+      <Link>Assets\StoreLogo.png</Link>
+    </Content>
   </ItemGroup>
 
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\DesktopBridge\Microsoft.DesktopBridge.targets" />

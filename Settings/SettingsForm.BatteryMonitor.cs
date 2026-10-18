@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -21,6 +22,7 @@ public sealed partial class SettingsForm : Form
     private const int StaticPreviewTileGapLogicalWidth = 6;
     private const int StaticPreviewAreaLeftSpacingLogicalWidth = 8;
     private const int StaticCardVerticalPaddingLogicalHeight = 6;
+    private const int StaticTextTitleLogicalHeight = 20;
     private const int StaticTextTitleDescriptionGapLogicalHeight = 6;
 
     private void RebuildDevicePage()
@@ -32,7 +34,7 @@ public sealed partial class SettingsForm : Form
     private void ShowBatteryMonitorPage()
     {
         BeginResponsivePage();
-        AddPageHeader(_activePageLayout!, "battery_monitor", Glyph.Battery, "BatteryMonitorTitle", "BatteryMonitorDescription");
+        AddPageHeader(_activePageLayout!, "battery_monitor", Glyph.Battery, "Battery", "BatteryMonitorDescription");
         _batteryModeCards.Clear();
 
         RoundedPanel staticCard = CreateResponsiveCard(StaticBatteryCardLogicalHeight);
@@ -119,27 +121,25 @@ public sealed partial class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 3,
             Margin = new Padding(0),
             BackColor = Color.Transparent
         };
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        text.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        text.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(StaticTextTitleLogicalHeight)));
         text.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(StaticTextTitleDescriptionGapLogicalHeight)));
-        text.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         Label titleLabel = CreateWrappedLabel(title, true, 9.5f);
         titleLabel.TextAlign = ContentAlignment.MiddleLeft;
         titleLabel.Margin = new Padding(0);
         titleLabel.Click += (_, _) => SelectBatteryDisplayMode(BatteryDisplayMode.StaticIcon);
-        text.Controls.Add(titleLabel, 0, 1);
+        text.Controls.Add(titleLabel, 0, 0);
 
         Label descriptionLabel = CreateWrappedLabel(description, false, 8.5f);
         descriptionLabel.TextAlign = ContentAlignment.TopLeft;
         descriptionLabel.Margin = new Padding(0);
         descriptionLabel.Click += (_, _) => SelectBatteryDisplayMode(BatteryDisplayMode.StaticIcon);
-        text.Controls.Add(descriptionLabel, 0, 3);
+        text.Controls.Add(descriptionLabel, 0, 2);
         root.Controls.Add(text, 1, 0);
 
         TableLayoutPanel previewRow = new()
@@ -275,12 +275,9 @@ public sealed partial class SettingsForm : Form
 
     private static string GetBatteryMonitorThemeIconPath(bool dark)
     {
-        string themeFolder = dark ? "Dark" : "Light";
         string themeName = dark ? "dark" : "light";
-        return Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            themeFolder,
+        return AssetPaths.GetThemeIconPath(
+            dark,
             $"theme-{themeName}-25x25.png");
     }
 

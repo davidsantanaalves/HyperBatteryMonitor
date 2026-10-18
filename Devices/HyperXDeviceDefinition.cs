@@ -12,6 +12,12 @@ public sealed class HyperXDeviceDefinition
 
     public IReadOnlyList<string> AlternateInterfacePatterns { get; init; } = Array.Empty<string>();
 
+    // Set only when a documented HID control collection's Usage Page/Usage is known.
+    // A null pair retains the existing exact/first-match behavior for legacy drivers.
+    public ushort? ControlUsagePage { get; init; }
+    public ushort? ControlUsage { get; init; }
+
+
     public required byte[] BatteryCommandBytes { get; init; }
 
     public required int BatteryByteIndex { get; init; }

@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -29,6 +30,17 @@ public sealed partial class SettingsForm : Form
     private const int NotificationPrimaryRowLogicalHeight = 50;
     private const int StandardUiIconLogicalSize = 25;
     private const int LargeUiIconLogicalSize = 36;
+    private const int FooterLogicalHeight = 62;
+    private const int FooterHorizontalPaddingLogical = 20;
+    private const int FooterVerticalPaddingLogical = 13;
+    private const int FooterButtonGapLogical = 10;
+    private const int FooterButtonLogicalHeight = 36;
+    private const int FooterResetButtonMinimumWidthLogical = 124;
+    private const int FooterPrimaryButtonMinimumWidthLogical = 84;
+    private const int FooterSecondaryButtonMinimumWidthLogical = 92;
+    private const int FooterResetButtonLeftPaddingLogical = 32;
+    private const int FooterResetButtonRightPaddingLogical = 14;
+    private const int FooterStandardButtonHorizontalPaddingLogical = 18;
     private const int WmSetRedraw = 0x000B;
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
@@ -63,12 +75,9 @@ public sealed partial class SettingsForm : Form
     private Control CreateMicrophoneMuteTableIcon()
     {
         bool dark = EffectiveTheme == AppTheme.Dark;
-        string themeDirectory = dark ? "Dark" : "Light";
         string themePrefix = dark ? "dark" : "light";
-        string path = Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            themeDirectory,
+        string path = AssetPaths.GetThemeIconPath(
+            dark,
             $"{themePrefix}_mute-{StandardUiIconLogicalSize}x{StandardUiIconLogicalSize}.png");
 
         return File.Exists(path)
@@ -271,6 +280,8 @@ public sealed partial class SettingsForm : Form
 
     private TableLayoutPanel BeginResponsivePage()
     {
+        _activePageScrollBar?.Dispose();
+        _activePageScrollBar = null;
         _pageHost.Controls.Clear();
         _activePageLayout = new TableLayoutPanel
         {
@@ -286,6 +297,7 @@ public sealed partial class SettingsForm : Form
         };
         _activePageLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         _pageHost.Controls.Add(_activePageLayout);
+        _activePageScrollBar = new ThemedVerticalScrollBar(_activePageLayout, EffectiveTheme == AppTheme.Dark);
         if (IsHandleCreated)
             ApplyNativeScrollTheme(_activePageLayout, EffectiveTheme == AppTheme.Dark);
         return _activePageLayout;
@@ -395,10 +407,9 @@ public sealed partial class SettingsForm : Form
             Margin = new Padding(0)
         };
         language.Controls.Add(_languageComboBox, 2, 0);
-        _languageComboBox.Items.Add(Localization.LanguageDisplay(AppLanguage.English));
-        _languageComboBox.Items.Add(Localization.LanguageDisplay(AppLanguage.PortugueseBrazil));
-        _languageComboBox.Items.Add(Localization.LanguageDisplay(AppLanguage.Spanish));
-        _languageComboBox.SelectedIndex = (int)_selectedLanguage;
+        foreach (AppLanguage languageOption in Localization.SupportedLanguages)
+            _languageComboBox.Items.Add(Localization.LanguageDisplay(languageOption));
+        _languageComboBox.SelectedIndex = Localization.LanguageIndex(_selectedLanguage);
         _languageComboBox.SelectedIndexChanged += LanguageComboBox_SelectedIndexChanged;
 
         RoundedPanel themeCard = CreateResponsiveCard(202);
@@ -445,6 +456,7 @@ public sealed partial class SettingsForm : Form
         startupText.Controls.Add(startupDescription, 0, 1);
         startup.Controls.Add(startupText, 1, 0);
         _startupToggle = new ToggleSwitchControl { Dock = DockStyle.None, Anchor = AnchorStyles.Right, Size = ScaleUiSize(42, 24), Checked = _pendingStartupEnabled, DarkMode = EffectiveTheme == AppTheme.Dark, Margin = new Padding(0) };
+        _startupToggle.Enabled = !ApplicationRuntime.IsTestMode;
         _startupToggle.CheckedChanged += (_, _) => _pendingStartupEnabled = _startupToggle.Checked;
         startup.Controls.Add(_startupToggle, 2, 0);
     }
@@ -694,8 +706,8 @@ public sealed partial class SettingsForm : Form
     {
         _footer = new Panel
         {
-            Location = new Point(_sidebar.Width, ClientSize.Height - 62),
-            Size = new Size(ClientSize.Width - _sidebar.Width, 62),
+            Location = new Point(_sidebar.Width, ClientSize.Height - FooterLogicalHeight),
+            Size = new Size(ClientSize.Width - _sidebar.Width, FooterLogicalHeight),
             Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             BackColor = LightBackground
         };
@@ -706,39 +718,89 @@ public sealed partial class SettingsForm : Form
             e.Graphics.DrawLine(pen, 0, 0, _footer.Width, 0);
         };
 
-        _footer.Controls.Add(_resetButton);
-        _footer.Controls.Add(_okButton);
-        _footer.Controls.Add(_cancelButton);
-        _footer.Controls.Add(_applyButton);
+        TableLayoutPanel footerLayout = new()
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(
+                FooterHorizontalPaddingLogical,
+                FooterVerticalPaddingLogical,
+                FooterHorizontalPaddingLogical,
+                FooterVerticalPaddingLogical),
+            BackColor = Color.Transparent
+        };
+        footerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        _resetButton.Anchor = AnchorStyles.Left;
+        _resetButton.Margin = new Padding(0);
+        footerLayout.Controls.Add(_resetButton, 0, 0);
+
+        FlowLayoutPanel actions = new()
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Color.Transparent
+        };
+        _okButton.Margin = new Padding(0, 0, FooterButtonGapLogical, 0);
+        _cancelButton.Margin = new Padding(0, 0, FooterButtonGapLogical, 0);
+        _applyButton.Margin = new Padding(0);
+        actions.Controls.Add(_okButton);
+        actions.Controls.Add(_cancelButton);
+        actions.Controls.Add(_applyButton);
+        footerLayout.Controls.Add(actions, 1, 0);
+
+        _footer.Controls.Add(footerLayout);
         Controls.Add(_footer);
         _footer.BringToFront();
-        Resize += (_, _) => PositionFooterButtons();
-        PositionFooterButtons();
+        Resize += (_, _) => PositionFooter();
+        PositionFooter();
     }
 
-    private void PositionFooterButtons()
+    private void PositionFooter()
     {
-        if (_footer == null) return;
+        if (_footer == null)
+            return;
+
         _footer.Location = new Point(_sidebar.Width, ClientSize.Height - _footer.Height);
         _footer.Width = Math.Max(0, ClientSize.Width - _sidebar.Width);
-        int horizontalInset = ScaleUi(20);
-        int verticalInset = ScaleUi(13);
-        int buttonGap = ScaleUi(10);
-        _resetButton.Location = new Point(horizontalInset, verticalInset);
-        _applyButton.Location = new Point(_footer.ClientSize.Width - _applyButton.Width - horizontalInset, verticalInset);
-        _cancelButton.Location = new Point(_applyButton.Left - _cancelButton.Width - buttonGap, verticalInset);
-        _okButton.Location = new Point(_cancelButton.Left - _okButton.Width - buttonGap, verticalInset);
+        _footer.PerformLayout();
     }
 
-    private Button CreateFooterButton(string text, bool primary)
+    private Button CreateFooterButton(string text, bool primary, bool showResetIcon = false)
     {
         return new ActionButton(_iconCache)
         {
             Text = text,
-            Size = new Size(primary ? 84 : (text == L("RestoreDefaults") ? 178 : 92), 36),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            MinimumSize = new Size(
+                showResetIcon
+                    ? FooterResetButtonMinimumWidthLogical
+                    : (primary ? FooterPrimaryButtonMinimumWidthLogical : FooterSecondaryButtonMinimumWidthLogical),
+                FooterButtonLogicalHeight),
+            Padding = showResetIcon
+                ? new Padding(
+                    FooterResetButtonLeftPaddingLogical,
+                    0,
+                    FooterResetButtonRightPaddingLogical,
+                    0)
+                : new Padding(
+                    FooterStandardButtonHorizontalPaddingLogical,
+                    0,
+                    FooterStandardButtonHorizontalPaddingLogical,
+                    0),
             Font = new Font("Segoe UI", 9f),
             Primary = primary,
-            ShowResetIcon = !primary && text == L("RestoreDefaults")
+            ShowResetIcon = showResetIcon
         };
     }
 
@@ -746,7 +808,7 @@ public sealed partial class SettingsForm : Form
     {
         return navigationKey switch
         {
-            "BatteryMonitor" => "BatteryMonitorTitle",
+            "BatteryMonitor" => "Battery",
             _ => navigationKey
         };
     }

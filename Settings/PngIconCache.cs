@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -118,9 +119,8 @@ internal sealed class PngIconCache : IDisposable
 
     private static string GetIconPath(string iconKey, bool darkMode, int sizePx)
     {
-        string theme = darkMode ? "Dark" : "Light";
         string suffix = darkMode ? "dark" : "light";
-        string directory = Path.Combine(AppContext.BaseDirectory, "Icons", theme);
+        string directory = AssetPaths.GetThemeIconsDirectory(darkMode);
 
         string standardPath = Path.Combine(
             directory,
@@ -135,9 +135,7 @@ internal sealed class PngIconCache : IDisposable
             return themePrefixPath;
 
         string sharedPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            "All",
+            AssetPaths.CommonIconsDirectory,
             $"{iconKey}-{sizePx}x{sizePx}.png");
 
         return File.Exists(sharedPath)
@@ -170,10 +168,9 @@ internal sealed class PngIconCache : IDisposable
         if (_assetSizes.TryGetValue(cacheKey, out int[]? cached))
             return cached;
 
-        string theme = darkMode ? "Dark" : "Light";
         string suffix = darkMode ? "dark" : "light";
-        string themeDirectory = Path.Combine(AppContext.BaseDirectory, "Icons", theme);
-        string sharedDirectory = Path.Combine(AppContext.BaseDirectory, "Icons", "All");
+        string themeDirectory = AssetPaths.GetThemeIconsDirectory(darkMode);
+        string sharedDirectory = AssetPaths.CommonIconsDirectory;
 
         List<int> sizes = new();
         CollectAssetSizes(

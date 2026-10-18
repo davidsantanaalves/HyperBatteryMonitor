@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -214,11 +215,21 @@ public sealed partial class SettingsForm : Form
             "HyperX Cloud Stinger Core Wireless + 7.1" => "cloudstingercorewireless7.1.png",
             "HyperX Cloud Flight 2" => "cloudflight2.png",
             "HyperX Cloud Mix 2" => "cloudmix2.png",
+        "HyperX Cloud Alpha 2 Wireless" => "cloudalpha2.png",
+        "HyperX Cloud Stinger 3 Wireless" => "cloudstinger3.png",
+        "HyperX Cloud III (Receiver 0FCC)" => "cloud3.png",
+        "HyperX Cloud III S (Receiver 02CC)" => "cloud3.png",
+        "HyperX Cloud III S (TIO - Three-In-One)" => "cloud3.png",
+        "HyperX Cloud Flight 2 (Xbox)" => "cloudflight2.png",
+        "HyperX Cloud Flight 2 (TIO - Three-In-One)" => "cloudflight2.png",
+        "HyperX Cloud Stinger 3 Wireless (PC)" => "cloudstinger3.png",
+        "HyperX Cloud Stinger 3 Wireless (PlayStation)" => "cloudstinger3.png",
+        "HyperX Cloud Stinger 3 Wireless (Xbox)" => "cloudstinger3.png",
             _ => "unknown-device.png"
         };
 
         _sidebarDeviceNameLabel.Text = selected
-            ? Localization.DeviceDisplayName(normalized, _selectedLanguage)
+            ? Localization.DeviceDisplayName(HyperXDeviceManager.GetSelectionModelName(normalized), _selectedLanguage)
             : L("UnknownHeadphones");
         _sidebarStatusLabel.Text = connected
             ? L("Connected")
@@ -277,7 +288,7 @@ public sealed partial class SettingsForm : Form
 
         if (!string.IsNullOrWhiteSpace(imageFile))
         {
-            string imagePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Devices", imageFile);
+            string imagePath = AssetPaths.GetDeviceImagePath(imageFile);
             if (File.Exists(imagePath))
             {
                 try
@@ -308,13 +319,10 @@ public sealed partial class SettingsForm : Form
         _sidebarMicrophoneIcon.Image = null;
         previous?.Dispose();
 
-        string themeDirectory = dark ? "Dark" : "Light";
         string themePrefix = dark ? "dark" : "light";
         string iconName = useMuteIcon ? MicrophoneMutedIconAssetName : MicrophoneOpenIconAssetName;
-        string path = Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            themeDirectory,
+        string path = AssetPaths.GetThemeIconPath(
+            dark,
             $"{themePrefix}_{iconName}-{SidebarMicrophoneIconLogicalSize}x{SidebarMicrophoneIconLogicalSize}.png");
 
         if (File.Exists(path))
@@ -347,6 +355,14 @@ public sealed partial class SettingsForm : Form
 
         string[] values = normalized switch
         {
+            "HyperX Cloud III (Receiver 0FCC)" => new[]
+            {
+                L("Cloud3Wireless_WirelessTechnology"),
+                L("Cloud3Wireless_ConnectionMethod"),
+                L("Cloud3Wireless_Range"),
+                L("Cloud3Wireless_Battery"),
+                L("Cloud3Wireless_ChargeTime")
+            },
             "HyperX Cloud III" => new[]
             {
                 L("Cloud3Wireless_WirelessTechnology"),
@@ -354,6 +370,14 @@ public sealed partial class SettingsForm : Form
                 L("Cloud3Wireless_Range"),
                 L("Cloud3Wireless_Battery"),
                 L("Cloud3Wireless_ChargeTime")
+            },
+            "HyperX Cloud III S (Receiver 02CC)" => new[]
+            {
+                L("Cloud3S_WirelessTechnology"),
+                L("Cloud3S_ConnectionMethod"),
+                L("Cloud3S_Range"),
+                L("Cloud3S_Battery"),
+                L("Cloud3S_ChargeTime")
             },
             "HyperX Cloud III S" => new[]
             {
@@ -419,6 +443,14 @@ public sealed partial class SettingsForm : Form
                 L("CloudFlight2_Battery"),
                 L("CloudFlight2_ChargeTime")
             },
+            "HyperX Cloud Stinger 3 Wireless" => new[]
+            {
+                L("DeviceInformationNA"),
+                L("DeviceInformationNA"),
+                L("DeviceInformationNA"),
+                L("DeviceInformationNA"),
+                L("DeviceInformationNA")
+            },
             "HyperX Cloud Mix 2" => new[]
             {
                 L("CloudMix2_WirelessTechnology"),
@@ -436,6 +468,16 @@ public sealed partial class SettingsForm : Form
                 L("DeviceInformationNA")
             }
         };
+
+        // Show the actual transport only when a verified Bluetooth battery
+        // session is active. The USB-specific range/lifetime is not applicable.
+        if (_device is BluetoothFallbackDevice bluetooth && bluetooth.IsUsingBluetooth)
+        {
+            values[0] = "Bluetooth";
+            values[1] = "Bluetooth";
+            values[2] = L("DeviceInformationNA");
+            values[3] = L("DeviceInformationNA");
+        }
 
         _wirelessTechnologyValueLabel.Text = values[0];
         _connectionMethodValueLabel.Text = values[1];

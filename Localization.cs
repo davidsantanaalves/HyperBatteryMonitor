@@ -1,43 +1,121 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using HyperXBatteryTray.Devices;
 
 namespace HyperXBatteryTray.Settings;
 
-public enum AppLanguage
-{
-    English,
-    PortugueseBrazil,
-    Spanish
-}
-
-public enum AppTheme
-{
-    Light,
-    Dark,
-    System
-}
-
 public static class Localization
 {
+    private const string ResourcePrefix = "HyperXBatteryTray.Languages.";
+
+    private static readonly Regex FormatPlaceholderRegex = new(
+        @"(?:\{\{|\}\})|\{([0-9]+) *(?:,[^}:]+)?(?::[^}]*)?\}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly LanguageDefinition[] LanguageDefinitions =
+    {
+        new(AppLanguage.English, "en-US.json", "🇺🇸", "English", "en"),
+        new(AppLanguage.PortugueseBrazil, "pt-BR.json", "🇧🇷", "Português (Brasil)", "pt"),
+        new(AppLanguage.Spanish, "es.json", "🇪🇸", "Español", "es"),
+
+        // Ukrainian localization contributed by sladkOy and reviewed against the v2.3.0 key set.
+        new(AppLanguage.Ukrainian, "uk-UA.json", "🇺🇦", "Українська", "uk"),
+
+        new(AppLanguage.German, "de-DE.json", "🇩🇪", "Deutsch", "de"),
+        new(AppLanguage.French, "fr-FR.json", "🇫🇷", "Français", "fr"),
+        new(AppLanguage.Polish, "pl-PL.json", "🇵🇱", "Polski", "pl"),
+        new(AppLanguage.Russian, "ru-RU.json", "🇷🇺", "Русский", "ru"),
+        new(
+            AppLanguage.ChineseSimplified,
+            "zh-CN.json",
+            "🇨🇳",
+            "简体中文",
+            null,
+            "zh-CN",
+            "zh-SG",
+            "zh-Hans"),
+        new(AppLanguage.Japanese, "ja-JP.json", "🇯🇵", "日本語", "ja"),
+        new(AppLanguage.Korean, "ko-KR.json", "🇰🇷", "한국어", "ko")
+    };
+
+    private static readonly AppLanguage[] SupportedLanguageValues =
+        LanguageDefinitions
+            .Select(definition => definition.Language)
+            .ToArray();
+
+    private static readonly IReadOnlyDictionary<AppLanguage, LanguageDefinition>
+        DefinitionsByLanguage = LanguageDefinitions.ToDictionary(
+            definition => definition.Language);
+
+    private static readonly IReadOnlyDictionary<
+        AppLanguage,
+        IReadOnlyDictionary<string, string>> TranslationCatalogs =
+            LoadTranslationCatalogs();
+
+    public static IReadOnlyList<AppLanguage> SupportedLanguages => SupportedLanguageValues;
+
     public static string Get(string key, AppLanguage language)
     {
-        return language switch
+        if (TranslationCatalogs.TryGetValue(language, out IReadOnlyDictionary<string, string>? catalog) &&
+            catalog.TryGetValue(key, out string? localized))
         {
-            AppLanguage.PortugueseBrazil => Portuguese.TryGetValue(key, out string? pt)
-                ? pt
-                : English.TryGetValue(key, out string? enPt) ? enPt : key,
-            AppLanguage.Spanish => Spanish.TryGetValue(key, out string? es)
-                ? es
-                : English.TryGetValue(key, out string? enEs) ? enEs : key,
-            _ => English.TryGetValue(key, out string? en) ? en : key
-        };
+            return localized;
+        }
+
+        return GetEnglishOrKey(key);
     }
 
-    public static string LanguageDisplay(AppLanguage language) => language switch
+    public static string LanguageDisplay(AppLanguage language)
     {
-        AppLanguage.PortugueseBrazil => "🇧🇷 Português (Brasil)",
-        AppLanguage.Spanish => "🇪🇸 Español",
-        _ => "🇺🇸 English"
-    };
+        return DefinitionsByLanguage.TryGetValue(language, out LanguageDefinition? definition)
+            ? definition.DisplayName
+            : DefinitionsByLanguage[AppLanguage.English].DisplayName;
+    }
+
+    public static int LanguageIndex(AppLanguage language)
+    {
+        int index = Array.IndexOf(SupportedLanguageValues, language);
+        return index >= 0 ? index : 0;
+    }
+
+    public static AppLanguage LanguageAt(int index)
+    {
+        return index >= 0 && index < SupportedLanguageValues.Length
+            ? SupportedLanguageValues[index]
+            : AppLanguage.English;
+    }
+
+    public static AppLanguage DetectLanguage(CultureInfo culture)
+    {
+        ArgumentNullException.ThrowIfNull(culture);
+
+        foreach (LanguageDefinition definition in LanguageDefinitions)
+        {
+            foreach (string prefix in definition.CulturePrefixes)
+            {
+                if (culture.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return definition.Language;
+            }
+        }
+
+        foreach (LanguageDefinition definition in LanguageDefinitions)
+        {
+            if (definition.TwoLetterIsoCode != null &&
+                string.Equals(
+                    culture.TwoLetterISOLanguageName,
+                    definition.TwoLetterIsoCode,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return definition.Language;
+            }
+        }
+
+        return AppLanguage.English;
+    }
 
     public static string DeviceDisplayName(string? deviceName, AppLanguage language)
     {
@@ -46,629 +124,192 @@ public static class Localization
 
         string canonicalName = HyperXDeviceManager.NormalizeSupportedDeviceName(deviceName);
 
+        // Keep the persisted device identity unchanged; simplify only the user-visible label.
+        // Hide connection-specific suffixes without changing persisted device identity.
+        if (string.Equals(canonicalName, "HyperX Cloud Alpha 2 Wireless", StringComparison.OrdinalIgnoreCase))
+            return "HyperX Cloud Alpha 2";
+        if (string.Equals(canonicalName, "HyperX Cloud Stinger 3 Wireless", StringComparison.OrdinalIgnoreCase))
+            return "HyperX Cloud Stinger 3";
+        if (string.Equals(canonicalName, "HyperX Cloud Stinger Core Wireless + 7.1", StringComparison.OrdinalIgnoreCase))
+            return "HyperX Cloud Stinger Core + 7.1";
+
         return HyperXDeviceManager.RequiresDedicatedDongle(canonicalName)
             ? string.Format(Get("DedicatedDongleDeviceFormat", language), canonicalName)
             : canonicalName;
     }
 
-    private static readonly Dictionary<string, string> English = new()
+    private static IReadOnlyDictionary<
+        AppLanguage,
+        IReadOnlyDictionary<string, string>> LoadTranslationCatalogs()
     {
-        ["WindowTitle"] = "Settings - {0} - v{1}",
-        ["Device"] = "Device",
-        ["Interface"] = "Interface",
-        ["InterfaceDescription"] = "Customize the appearance and behavior of the application.",
-        ["ThemeLight"] = "Light",
-        ["ThemeDark"] = "Dark",
-        ["ThemeSystem"] = "System",
-        ["BatteryMonitorTitle"] = "Battery Monitor",
-        ["BatteryMonitorDescription"] = "Choose how the system tray icon will show your headset battery level.",
-        ["BatteryMonitorStaticTitle"] = "Static icon",
-        ["BatteryMonitorStaticDescription"] = "Show only the headset icon without animation and an indicator when the headset is being charged.",
-        ["BatteryMonitorDynamicTitle"] = "Dynamic glow icon",
-        ["BatteryMonitorDynamicDescription"] = "Show a glow around the icon based on the battery level.",
-        ["BatteryMonitorCustomTitle"] = "Custom dynamic icon",
-        ["BatteryMonitorCustomDescription"] = "Change the icon color based on the battery level with customizable options.",
-        ["BatteryMonitorCustomize"] = "Customize",
-        ["CustomizeDynamicIconColors"] = "Customize Dynamic Icon Colors",
-        ["CustomizeDynamicIconColorsDescription"] = "Define the colors and battery levels for the dynamic icon.",
-        ["CustomizeDynamicIconColorsDescription2"] = "The icon will change color based on the configured levels.",
-        ["HighBatteryColor"] = "High battery color",
-        ["MediumBatteryColor"] = "Medium battery color",
-        ["LowBatteryColor"] = "Low battery color",
-        ["UsedFromThisLevelAndAbove"] = "Used from this level and above.",
-        ["UsedBelowThisLevel"] = "Used below this level.",
-        ["BatteryLevel"] = "Battery level:",
-        ["UseGradientDescription"] = "Smoothly transition between colors instead of switching at fixed levels.",
-        ["GradientTransitionStep"] = "Gradient transition step",
-        ["GradientTransitionStepDescription"] = "Defines the percentage interval for the color transition.",
-        ["Preview"] = "Preview",
-        ["ResetToDefaults"] = "Reset to defaults",
-        ["BatteryPreviewNormal"] = "Normal",
-        ["BatteryPreviewCharging"] = "Charging",
-        ["UseGradient"] = "Use gradient between colors",
-        ["Ok"] = "OK",
-        ["Cancel"] = "Cancel",
-        ["Apply"] = "Apply",
-        ["RestoreDefaults"] = "Restore defaults",
-        ["RestoreDefaultsQuestion"] = "Restore all settings to their default values?",
-        ["InvalidSettings"] = "Invalid settings",
-        ["ColorOrderError"] = "Color limits must be in descending order.\n\nExample:\nGreen > Yellow > Red.",
-        ["SaveError"] = "Could not save settings.\n\n{0}",
-        ["StartupError"] = "Could not change Windows startup settings.\n\n{0}",
-        ["AboutVersion"] = "Version {0}",
-        ["AboutTagline"] = "Keep track. Stay in the game.",
-        ["AboutDescription"] = "HyperX Battery Monitor shows the battery level of your HyperX wireless devices\nin the system tray, so you can always stay powered and ready.",
-        ["AboutGitHub"] = "GitHub",
-        ["AboutSupportButton"] = "Support",
-        ["AboutDocumentation"] = "Documentation",
-        ["AboutHyperX"] = "HyperX",
-        ["AboutLegalTitle"] = "Legal",
-        ["AboutLegalText"] = "This project is not affiliated with or endorsed by HP Inc. or HyperX.\nHyperX is a trademark of HP Inc., used for identification purposes only.",
-        ["AboutThirdPartyLicenses"] = "Third-party licenses",
-        ["AboutAcknowledgementsTitle"] = "Acknowledgements",
-        ["AboutAcknowledgementsText"] = "Support for multiple devices in this project uses code and references from the HyperX-Cloud-2-Battery-Monitor project by auto94, made available under the MIT License.",
-        ["AboutAcknowledgementsThanks"] = "Our thanks to auto94 for the valuable contribution to the community.",
-        ["AboutAcknowledgementsRepository"] = "https://github.com/auto94/HyperX-Cloud-2-Battery-Monitor",
-        ["TrayBattery"] = "Battery: {0}%",
-        ["TrayBatteryWithRemaining"] = "Battery: {0}% ({1})",
-        ["BatteryRemainingHours"] = "{0} h",
-        ["BatteryRemainingMinutes"] = "{0} min",
-        ["TrayBatteryNA"] = "Battery: N/A",
-        ["TrayMicrophone"] = "Mic: {0}",
-		["TrayCharging"] = "(Charging)",
-        ["ChargingStatus"] = "Charging...",
-        ["TrayConnected"] = "Status: Connected",
-        ["TrayDisconnected"] = "Status: Disconnected",
-        ["About"] = "About",
-        ["ContextMenuSettings"] = "Settings",
-        ["ContextMenuExit"] = "Exit",
-        ["DeviceInformationNA"] = "N/A",
-        ["Connection"] = "Connection",
-        ["ConnectionDescription"] = "Information about the wireless connection of your device.",
-        ["WirelessTechnology"] = "Wireless Technology",
-        ["ConnectionMethod"] = "Connection Method",
-        ["WirelessRange"] = "Wireless Range",
-        ["Battery"] = "Battery",
-        ["BatteryDescription"] = "Battery life and charging information.",
-        ["BatteryLife"] = "Battery Life",
-        ["ChargeTime"] = "Charge Time",
-        ["UnknownDeviceDescription"] = "Select a device to start.",
-        ["DeviceLabelShort"] = "Device",
-        ["DeviceDescription"] = "Select a device to monitor.",
-        ["LocateDevice"] = "Locate your device",
-        ["SupportedFeatures"] = "Supported features",
-        ["BatteryMonitoringFeature"] = "Battery level",
-        ["ChargingStatusFeature"] = "Battery charging",
-        ["MicrophoneStatusFeature"] = "Microphone status",
-        ["AutoDetectTooltip"] = "Detect device automatically",
-        ["AutoDetectionTitle"] = "Automatic detection",
-        ["AutoDetectionProgress"] = "Please wait while your headset is detected... [{0} s]",
-        ["AutoDetectionInstruction"] = "Please keep the headset powered on and connected during detection.",
-        ["AutoDetectionNoDevice"] = "No compatible device was detected. Please select your device manually.",
-        ["AutoDetectionMultipleDevices"] = "More than one compatible device was detected. Please select the desired device manually.",
-        ["AutoDetectionUnsupportedReceiver"] = "HyperX Three-In-One receiver detected. This connection type is not supported yet. For Cloud III S or Cloud Flight 2, use the dedicated dongle.",
-        ["DedicatedDongleDeviceFormat"] = "{0} (Dedicated Dongle)",
-        ["Connected"] = "Connected",
-        ["Disconnected"] = "Disconnected",
-        ["SidebarStatus"] = "Status:",
-        ["SidebarBattery"] = "Battery:",
-        ["SidebarMicrophone"] = "Mic:",
-        ["MicrophoneOpen"] = "Open",
-        ["MicrophoneMuted"] = "Muted",
-        ["MicrophoneNA"] = "N/A",
-        ["SidebarUnknown"] = "Unknown",
-        ["UnknownHeadphones"] = "Unknown headphones",
-        ["ConnectedDescription"] = "Your device is ready to use.",
-        ["DisconnectedDescription"] = "Your device is not currently connected.",
-        ["BatteryNA"] = "N/A",
-        ["Yes"] = "Yes",
-        ["No"] = "No",
-        ["LanguageShort"] = "Language",
-        ["LanguageDescription"] = "Select the application language.",
-        ["ThemeDescription"] = "Choose the application theme.",
-        ["StartupDescription"] = "Launch HyperX Battery Tray automatically when Windows starts.",
-        ["StartupShort"] = "Start with Windows",
-        ["ThemeShort"] = "Theme",
-        ["Notifications"] = "Notifications",
-        ["NotificationsDescription"] = "Configure when and how you want to be notified about your device.",
-        ["NotifyOnLowBattery"] = "Notify on low battery",
-        ["NotifyOnLowBatteryDescription"] = "Show a notification when the battery reaches a critical level.",
-        ["CriticalBatteryLevel"] = "Critical battery level",
-        ["NotifyWhenFullyCharged"] = "Notify when fully charged",
-        ["NotifyWhenFullyChargedDescription"] = "Show a notification when the headset is fully charged.",
-        ["FlashSystrayIcon"] = "Flash systray icon",
-        ["FlashSystrayIconDescription"] = "Make the systray icon flash when the battery reaches the critical level.",
-        ["ShowMicrophoneMuteInSystray"] = "Show muted microphone in systray",
-        ["ShowMicrophoneMuteInSystrayDescription"] = "Show a mute icon in the systray while the headset microphone is muted.",
-        ["NotificationLowBatteryTitle"] = "{0} is low on battery.",
-        ["NotificationLowBatteryInstruction"] = "Connect the charging cable to continue using your headset.",
-        ["NotificationBattery"] = "🪫 {0}%",
-        ["NotificationFullyChargedTitle"] = "{0} is fully charged.",
-        ["NotificationFullyChargedBattery"] = "🔋 100%",
-        ["NotificationFullyChargedInstruction"] = "The charging cable can be disconnected.",
+        Dictionary<AppLanguage, IReadOnlyDictionary<string, string>> catalogs = new();
 
-        // Devices Information - HyperX Cloud III Wireless
-        ["Cloud3Wireless_WirelessTechnology"] = "2.4 GHz wireless",
-        ["Cloud3Wireless_ConnectionMethod"] = "USB wireless dongle",
-        ["Cloud3Wireless_Range"] = "Up to 20 meters (65.6 feet)",
-        ["Cloud3Wireless_Battery"] = "Up to 120 hours",
-        ["Cloud3Wireless_ChargeTime"] = "Approximately 4.5 hours to full charge",
+        LanguageDefinition englishDefinition =
+            DefinitionsByLanguage[AppLanguage.English];
 
-        // Devices Information - HyperX Cloud III S
-        ["Cloud3S_WirelessTechnology"] = "2.4 GHz RF and Bluetooth 5.3",
-        ["Cloud3S_ConnectionMethod"] = "USB wireless dongle or Bluetooth",
-        ["Cloud3S_Range"] = "Up to 20 meters (65 feet)",
-        ["Cloud3S_Battery"] = "Up to 120 hours on 2.4 GHz; up to 200 hours in Bluetooth",
-        ["Cloud3S_ChargeTime"] = "Approximately 5 hours",
+        Dictionary<string, string> english = LoadCatalog(englishDefinition);
+        foreach ((string key, string value) in english)
+        {
+            try
+            {
+                CompositeFormat.Parse(value);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid canonical English format string: {englishDefinition.ResourceFileName} / {key}",
+                    ex);
+            }
+        }
+        catalogs[AppLanguage.English] = english;
 
-        // Devices Information - HyperX Cloud 2 Core
-        ["Cloud2Core_WirelessTechnology"] = "2.4 GHz wireless",
-        ["Cloud2Core_ConnectionMethod"] = "USB wireless adapter",
-        ["Cloud2Core_Range"] = "Up to 20 meters",
-        ["Cloud2Core_Battery"] = "Up to 80 hours",
-        ["Cloud2Core_ChargeTime"] = "4.5 hours",
+        foreach (LanguageDefinition definition in LanguageDefinitions)
+        {
+            if (definition.Language == AppLanguage.English)
+                continue;
 
-        // Devices Information - HyperX Cloud Alpha
-        ["CloudAlpha_WirelessTechnology"] = "2.4 GHz RF",
-        ["CloudAlpha_ConnectionMethod"] = "USB wireless adapter",
-        ["CloudAlpha_Range"] = "Up to 20 meters",
-        ["CloudAlpha_Battery"] = "Up to 300 hours",
-        ["CloudAlpha_ChargeTime"] = "Approximately 4.5 hours",
+            Dictionary<string, string> localized = LoadCatalog(definition);
+            ValidateCatalog(definition, localized, english);
+            catalogs[definition.Language] = localized;
+        }
 
-        // Devices Information - HyperX Cloud Flight S
-        ["CloudFlightS_WirelessTechnology"] = "2.4 GHz wireless",
-        ["CloudFlightS_ConnectionMethod"] = "USB wireless adapter",
-        ["CloudFlightS_Range"] = "Up to 20 meters",
-        ["CloudFlightS_Battery"] = "Up to 30 hours",
-        ["CloudFlightS_ChargeTime"] = "Approximately 3 hours",
+        return catalogs;
+    }
 
-        // Devices Information - HyperX Cloud Flight Wireless
-        ["CloudFlightWireless_WirelessTechnology"] = "2.4 GHz wireless",
-        ["CloudFlightWireless_ConnectionMethod"] = "USB wireless adapter",
-        ["CloudFlightWireless_Range"] = "Up to 20 meters",
-        ["CloudFlightWireless_Battery"] = "Up to 30 hours with LEDs off",
-        ["CloudFlightWireless_ChargeTime"] = "Approximately 3 hours",
-
-        // Devices Information - HyperX Cloud Stinger Core Wireless + 7.1
-        ["CloudStingerCoreWireless_WirelessTechnology"] = "2.4 GHz wireless",
-        ["CloudStingerCoreWireless_ConnectionMethod"] = "USB wireless adapter",
-        ["CloudStingerCoreWireless_Range"] = "Up to 20 meters",
-        ["CloudStingerCoreWireless_Battery"] = "Up to 17 hours",
-        ["CloudStingerCoreWireless_ChargeTime"] = "Approximately 3 hours",
-
-        // Devices Information - HyperX Cloud Flight 2
-        ["CloudFlight2_WirelessTechnology"] = "2.4 GHz wireless and Bluetooth 5.3",
-        ["CloudFlight2_ConnectionMethod"] = "USB wireless dongle or Bluetooth",
-        ["CloudFlight2_Range"] = "Up to 20 meters",
-        ["CloudFlight2_Battery"] = "Up to 100 hours in adapter mode; up to 150 hours via Bluetooth with LEDs off",
-        ["CloudFlight2_ChargeTime"] = "Approximately 3.5 hours",
-
-        // Devices Information - HyperX Cloud Mix 2
-        ["CloudMix2_WirelessTechnology"] = "2.4 GHz wireless and Bluetooth 5.3",
-        ["CloudMix2_ConnectionMethod"] = "USB wireless dongle, Bluetooth, or 3.5 mm cable",
-        ["CloudMix2_Range"] = "Up to 20 meters",
-        ["CloudMix2_Battery"] = "Up to 72 hours via dongle; up to 110 hours via Bluetooth with noise control off",
-        ["CloudMix2_ChargeTime"] = "Approximately 3 hours",
-
-        // Devices Information - HyperX Cloud Stinger 2
-        ["CloudStinger2_WirelessTechnology"] = "2.4 GHz wireless",
-        ["CloudStinger2_ConnectionMethod"] = "USB wireless adapter",
-        ["CloudStinger2_Range"] = "Up to 20 meters",
-        ["CloudStinger2_Battery"] = "Up to 20 hours",
-        ["CloudStinger2_ChargeTime"] = "Approximately 3.5 hours"
-    };
-
-    private static readonly Dictionary<string, string> Portuguese = new()
+    private static Dictionary<string, string> LoadCatalog(LanguageDefinition definition)
     {
-        ["WindowTitle"] = "Configurações - {0} - v{1}",
-        ["Device"] = "Dispositivo",
-        ["Interface"] = "Interface",
-        ["InterfaceDescription"] = "Personalize a aparência e o comportamento do aplicativo.",
-        ["ThemeLight"] = "Claro",
-        ["ThemeDark"] = "Escuro",
-        ["ThemeSystem"] = "Sistema",
-        ["BatteryMonitorTitle"] = "Monitor de Bateria",
-        ["BatteryMonitorDescription"] = "Escolha como o ícone da bandeja do sistema exibirá o nível da bateria do seu headset.",
-        ["BatteryMonitorStaticTitle"] = "Ícone estático",
-        ["BatteryMonitorStaticDescription"] = "Exibe apenas o ícone do headset, sem animação e um indicador quando o headset está sendo carregado.",
-        ["BatteryMonitorDynamicTitle"] = "Ícone com brilho dinâmico",
-        ["BatteryMonitorDynamicDescription"] = "Exibe um brilho ao redor do ícone com base no nível da bateria.",
-        ["BatteryMonitorCustomTitle"] = "Ícone dinâmico personalizado",
-        ["BatteryMonitorCustomDescription"] = "Altere a cor do ícone com base no nível da bateria, com opções personalizáveis.",
-        ["BatteryMonitorCustomize"] = "Personalizar",
-        ["CustomizeDynamicIconColors"] = "Personalizar cores do ícone dinâmico",
-        ["CustomizeDynamicIconColorsDescription"] = "Defina as cores e os níveis de bateria do ícone dinâmico.",
-        ["CustomizeDynamicIconColorsDescription2"] = "O ícone mudará de cor com base nos níveis configurados.",
-        ["HighBatteryColor"] = "Cor de bateria alta",
-        ["MediumBatteryColor"] = "Cor de bateria média",
-        ["LowBatteryColor"] = "Cor de bateria baixa",
-        ["UsedFromThisLevelAndAbove"] = "Usada a partir deste nível.",
-        ["UsedBelowThisLevel"] = "Usada abaixo deste nível.",
-        ["BatteryLevel"] = "Nível da bateria:",
-        ["UseGradientDescription"] = "Transição suave entre as cores em vez de alternar em níveis fixos.",
-        ["GradientTransitionStep"] = "Etapa de transição do degradê",
-        ["GradientTransitionStepDescription"] = "Define o intervalo percentual da transição de cor.",
-        ["Preview"] = "Pré-visualização",
-        ["ResetToDefaults"] = "Restaurar padrões",
-        ["BatteryPreviewNormal"] = "Normal",
-        ["BatteryPreviewCharging"] = "Carregando",
-        ["UseGradient"] = "Usar degradê entre as cores",
-        ["Ok"] = "OK",
-        ["Cancel"] = "Cancelar",
-        ["Apply"] = "Aplicar",
-        ["RestoreDefaults"] = "Restaurar padrões",
-        ["RestoreDefaultsQuestion"] = "Restaurar todas as configurações para os valores padrão?",
-        ["InvalidSettings"] = "Configurações inválidas",
-        ["ColorOrderError"] = "Os limites das cores devem estar em ordem decrescente.\n\nExemplo:\nVerde > Amarelo > Vermelho.",
-        ["SaveError"] = "Não foi possível salvar as configurações.\n\n{0}",
-        ["StartupError"] = "Não foi possível alterar a inicialização com o Windows.\n\n{0}",
-        ["AboutVersion"] = "Versão {0}",
-        ["AboutTagline"] = "Acompanhe. Continue no jogo.",
-        ["AboutDescription"] = "O HyperX Battery Monitor mostra o nível da bateria dos seus dispositivos HyperX sem fio\nno Systray, para que você possa estar sempre carregado e pronto.",
-        ["AboutGitHub"] = "GitHub",
-        ["AboutSupportButton"] = "Suporte",
-        ["AboutDocumentation"] = "Documentação",
-        ["AboutHyperX"] = "HyperX",
-        ["AboutLegalTitle"] = "Legal",
-        ["AboutLegalText"] = "Este projeto não é afiliado ou endossado pela HP Inc. ou HyperX.\nHyperX é uma marca registrada da HP Inc., usada apenas para fins de identificação.",
-        ["AboutThirdPartyLicenses"] = "Licenças de terceiros",
-        ["AboutAcknowledgementsTitle"] = "Agradecimentos",
-        ["AboutAcknowledgementsText"] = "O suporte a múltiplos dispositivos neste projeto utiliza código e referências do projeto HyperX-Cloud-2-Battery-Monitor, de auto94, disponibilizado sob a licença MIT.",
-        ["AboutAcknowledgementsThanks"] = "Nosso agradecimento a auto94 pela valiosa contribuição para a comunidade.",
-        ["AboutAcknowledgementsRepository"] = "https://github.com/auto94/HyperX-Cloud-2-Battery-Monitor",
-        ["TrayBattery"] = "Bateria: {0}%",
-        ["TrayBatteryWithRemaining"] = "Bateria: {0}% ({1})",
-        ["BatteryRemainingHours"] = "{0} h",
-        ["BatteryRemainingMinutes"] = "{0} min",
-        ["TrayBatteryNA"] = "Bateria: N/D",
-        ["TrayMicrophone"] = "Mic: {0}",
-		["TrayCharging"] = "(Carregando)",
-		["ChargingStatus"] = "Carregando...",
-        ["TrayConnected"] = "Status: Conectado",
-        ["TrayDisconnected"] = "Status: Desconectado",
-        ["About"] = "Sobre",
-        ["ContextMenuSettings"] = "Configurações",
-        ["ContextMenuExit"] = "Sair",
-        ["DeviceInformationNA"] = "N/D",
-        ["Connection"] = "Conexão",
-        ["ConnectionDescription"] = "Informações sobre a conexão sem fio do seu dispositivo.",
-        ["WirelessTechnology"] = "Tecnologia Sem Fio",
-        ["ConnectionMethod"] = "Método de Conexão",
-        ["WirelessRange"] = "Alcance Sem Fio",
-        ["Battery"] = "Bateria",
-        ["BatteryDescription"] = "Informações sobre duração e carregamento.",
-        ["BatteryLife"] = "Duração da Bateria",
-        ["ChargeTime"] = "Tempo de Carga",
-        ["UnknownDeviceDescription"] = "Selecione um dispositivo para iniciar.",
-        ["DeviceLabelShort"] = "Dispositivo",
-        ["DeviceDescription"] = "Selecione um dispositivo para monitorar.",
-        ["LocateDevice"] = "Localize seu dispositivo",
-        ["SupportedFeatures"] = "Recursos suportados",
-        ["BatteryMonitoringFeature"] = "Nível de bateria",
-        ["ChargingStatusFeature"] = "Bateria recarregando",
-        ["MicrophoneStatusFeature"] = "Status do microfone",
-        ["AutoDetectTooltip"] = "Detectar dispositivo automaticamente",
-        ["AutoDetectionTitle"] = "Detecção automática",
-        ["AutoDetectionProgress"] = "Aguarde enquanto seu fone é detectado... [{0} s]",
-        ["AutoDetectionInstruction"] = "Por favor, mantenha o fone ligado e conectado durante a detecção.",
-        ["AutoDetectionNoDevice"] = "Nenhum dispositivo compatível foi detectado, por favor selecione seu dispositivo manualmente.",
-        ["AutoDetectionMultipleDevices"] = "Mais de um dispositivo compatível foi detectado, por favor selecione o dispositivo desejado manualmente.",
-        ["AutoDetectionUnsupportedReceiver"] = "Receiver HyperX Three-In-One detectado. Este tipo de conexão ainda não é suportado. Para Cloud III S ou Cloud Flight 2, use o dongle dedicado.",
-        ["DedicatedDongleDeviceFormat"] = "{0} (Dongle Dedicado)",
-        ["Connected"] = "Conectado",
-        ["Disconnected"] = "Desconectado",
-        ["SidebarStatus"] = "Status:",
-        ["SidebarBattery"] = "Bateria:",
-        ["SidebarMicrophone"] = "Mic:",
-        ["MicrophoneOpen"] = "Aberto",
-        ["MicrophoneMuted"] = "Mudo",
-        ["MicrophoneNA"] = "N/D",
-        ["SidebarUnknown"] = "Desconhecido",
-        ["UnknownHeadphones"] = "Fone desconhecido",
-        ["ConnectedDescription"] = "Seu dispositivo está pronto para uso.",
-        ["DisconnectedDescription"] = "Seu dispositivo não está conectado no momento.",
-        ["BatteryNA"] = "N/D",
-        ["Yes"] = "Sim",
-        ["No"] = "Não",
-        ["LanguageShort"] = "Idioma",
-        ["LanguageDescription"] = "Selecione o idioma do aplicativo.",
-        ["ThemeDescription"] = "Escolha o tema do aplicativo.",
-        ["StartupDescription"] = "Inicie o HyperX Battery Tray automaticamente ao iniciar o Windows.",
-        ["StartupShort"] = "Iniciar com o Windows",
-        ["ThemeShort"] = "Tema",
-        ["Notifications"] = "Notificações",
-        ["NotificationsDescription"] = "Configure quando e como você deseja receber notificações sobre seu dispositivo.",
-        ["NotifyOnLowBattery"] = "Notificar com bateria baixa",
-        ["NotifyOnLowBatteryDescription"] = "Mostrar uma notificação quando a bateria atingir um nível crítico.",
-        ["CriticalBatteryLevel"] = "Nível crítico da bateria",
-        ["NotifyWhenFullyCharged"] = "Notificar quando estiver totalmente carregado",
-        ["NotifyWhenFullyChargedDescription"] = "Mostrar uma notificação quando o headset estiver totalmente carregado.",
-        ["FlashSystrayIcon"] = "Piscar o ícone do Systray",
-        ["FlashSystrayIconDescription"] = "Fazer o ícone do Systray piscar quando a bateria atingir o nível crítico.",
-        ["ShowMicrophoneMuteInSystray"] = "Mostrar microfone mudo no Systray",
-        ["ShowMicrophoneMuteInSystrayDescription"] = "Mostrar um ícone de microfone mudo no Systray enquanto o microfone do fone estiver mudo.",
-        ["NotificationLowBatteryTitle"] = "{0} está com bateria baixa.",
-        ["NotificationLowBatteryInstruction"] = "Conecte o cabo de carregamento para continuar usando seu fone.",
-        ["NotificationBattery"] = "🪫 {0}%",
-        ["NotificationFullyChargedTitle"] = "{0} está com bateria carregada.",
-        ["NotificationFullyChargedBattery"] = "🔋 100%",
-        ["NotificationFullyChargedInstruction"] = "O cabo de carregamento pode ser desconectado.",
+        string resourceName = ResourcePrefix + definition.ResourceFileName;
 
-        // Devices Information - HyperX Cloud III Wireless
-        ["Cloud3Wireless_WirelessTechnology"] = "Sem fio de 2.4 GHz",
-        ["Cloud3Wireless_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["Cloud3Wireless_Range"] = "Até 20 metros (65,6 pés)",
-        ["Cloud3Wireless_Battery"] = "Até 120 horas",
-        ["Cloud3Wireless_ChargeTime"] = "Aproximadamente 4,5 horas para carga completa",
+        try
+        {
+            Assembly assembly = typeof(Localization).Assembly;
+            using Stream? stream = assembly.GetManifestResourceStream(resourceName);
 
-        // Devices Information - HyperX Cloud III S
-        ["Cloud3S_WirelessTechnology"] = "RF de 2.4 GHz e Bluetooth 5.3",
-        ["Cloud3S_ConnectionMethod"] = "Adaptador USB sem fio ou Bluetooth",
-        ["Cloud3S_Range"] = "Até 20 metros",
-        ["Cloud3S_Battery"] = "Até 120 horas em 2.4 GHz; até 200 horas em Bluetooth",
-        ["Cloud3S_ChargeTime"] = "Aproximadamente 5 horas",
+            if (stream == null)
+            {
+                Debug.WriteLine(
+                    $"Localization resource was not found: {resourceName}");
+                return new Dictionary<string, string>(StringComparer.Ordinal);
+            }
 
-        // Devices Information - HyperX Cloud 2 Core
-        ["Cloud2Core_WirelessTechnology"] = "Sem fio de 2.4 GHz",
-        ["Cloud2Core_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["Cloud2Core_Range"] = "Até 20 metros",
-        ["Cloud2Core_Battery"] = "Até 80 horas",
-        ["Cloud2Core_ChargeTime"] = "4,5 horas",
+            using JsonDocument document = JsonDocument.Parse(stream);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                Debug.WriteLine(
+                    $"Localization resource must contain a JSON object: {resourceName}");
+                return new Dictionary<string, string>(StringComparer.Ordinal);
+            }
 
-        // Devices Information - HyperX Cloud Alpha
-        ["CloudAlpha_WirelessTechnology"] = "RF de 2.4 GHz",
-        ["CloudAlpha_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["CloudAlpha_Range"] = "Até 20 metros",
-        ["CloudAlpha_Battery"] = "Até 300 horas",
-        ["CloudAlpha_ChargeTime"] = "Aproximadamente 4,5 horas",
+            Dictionary<string, string> catalog = new(StringComparer.Ordinal);
 
-        // Devices Information - HyperX Cloud Flight S
-        ["CloudFlightS_WirelessTechnology"] = "Sem fio de 2,4 GHz",
-        ["CloudFlightS_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["CloudFlightS_Range"] = "Até 20 metros",
-        ["CloudFlightS_Battery"] = "Até 30 horas",
-        ["CloudFlightS_ChargeTime"] = "Aproximadamente 3 horas",
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind != JsonValueKind.String)
+                {
+                    Debug.WriteLine(
+                        $"Localization value must be a string: {resourceName} / {property.Name}");
+                    continue;
+                }
 
-        // Devices Information - HyperX Cloud Flight Wireless
-        ["CloudFlightWireless_WirelessTechnology"] = "Sem fio de 2,4 GHz",
-        ["CloudFlightWireless_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["CloudFlightWireless_Range"] = "Até 20 metros",
-        ["CloudFlightWireless_Battery"] = "Até 30 horas com os LEDs desligados",
-        ["CloudFlightWireless_ChargeTime"] = "Aproximadamente 3 horas",
+                string value = property.Value.GetString() ?? string.Empty;
 
-        // Devices Information - HyperX Cloud Stinger Core Wireless + 7.1
-        ["CloudStingerCoreWireless_WirelessTechnology"] = "Sem fio de 2,4 GHz",
-        ["CloudStingerCoreWireless_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["CloudStingerCoreWireless_Range"] = "Até 20 metros",
-        ["CloudStingerCoreWireless_Battery"] = "Até 17 horas",
-        ["CloudStingerCoreWireless_ChargeTime"] = "Aproximadamente 3 horas",
+                if (!catalog.TryAdd(property.Name, value))
+                {
+                    Debug.WriteLine(
+                        $"Duplicate localization key ignored: {resourceName} / {property.Name}");
+                }
+            }
 
-        // Devices Information - HyperX Cloud Flight 2
-        ["CloudFlight2_WirelessTechnology"] = "Sem fio de 2,4 GHz e Bluetooth 5.3",
-        ["CloudFlight2_ConnectionMethod"] = "Dongle sem fio USB ou Bluetooth",
-        ["CloudFlight2_Range"] = "Até 20 metros",
-        ["CloudFlight2_Battery"] = "Até 100 horas no modo adaptador; até 150 horas via Bluetooth com os LEDs desligados",
-        ["CloudFlight2_ChargeTime"] = "Aproximadamente 3,5 horas",
+            return catalog;
+        }
+        catch (Exception ex) when (
+            ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            Debug.WriteLine(
+                $"Could not load localization resource {resourceName}: {ex.Message}");
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
 
-        // Devices Information - HyperX Cloud Mix 2
-        ["CloudMix2_WirelessTechnology"] = "Sem fio de 2,4 GHz e Bluetooth 5.3",
-        ["CloudMix2_ConnectionMethod"] = "Dongle sem fio USB, Bluetooth ou cabo 3,5 mm",
-        ["CloudMix2_Range"] = "Até 20 metros",
-        ["CloudMix2_Battery"] = "Até 72 horas via dongle; até 110 horas via Bluetooth sem o controle de ruído",
-        ["CloudMix2_ChargeTime"] = "Aproximadamente 3 horas",
-
-        // Devices Information - HyperX Cloud Stinger 2
-        ["CloudStinger2_WirelessTechnology"] = "Sem fio de 2.4 GHz",
-        ["CloudStinger2_ConnectionMethod"] = "Adaptador USB sem fio",
-        ["CloudStinger2_Range"] = "Até 20 metros",
-        ["CloudStinger2_Battery"] = "Até 20 horas",
-        ["CloudStinger2_ChargeTime"] = "Aproximadamente 3,5 horas"
-    };
-
-    private static readonly Dictionary<string, string> Spanish = new()
+    private static void ValidateCatalog(
+        LanguageDefinition definition,
+        Dictionary<string, string> localized,
+        IReadOnlyDictionary<string, string> english)
     {
-        ["WindowTitle"] = "Configuración - {0} - v{1}",
-        ["Device"] = "Dispositivo",
-        ["Interface"] = "Interfaz",
-        ["InterfaceDescription"] = "Personaliza la apariencia y el comportamiento de la aplicación.",
-        ["ThemeLight"] = "Claro",
-        ["ThemeDark"] = "Oscuro",
-        ["ThemeSystem"] = "Sistema",
-        ["BatteryMonitorTitle"] = "Monitor de batería",
-        ["BatteryMonitorDescription"] = "Elige cómo el icono de la bandeja del sistema mostrará el nivel de batería de tus auriculares.",
-        ["BatteryMonitorStaticTitle"] = "Icono estático",
-        ["BatteryMonitorStaticDescription"] = "Muestra solo el icono de los auriculares, sin animación y un indicador cuando los auriculares se están cargando.",
-        ["BatteryMonitorDynamicTitle"] = "Icono con brillo dinámico",
-        ["BatteryMonitorDynamicDescription"] = "Muestra un brillo alrededor del icono según el nivel de batería.",
-        ["BatteryMonitorCustomTitle"] = "Icono dinámico personalizado",
-        ["BatteryMonitorCustomDescription"] = "Cambia el color del icono según el nivel de batería, con opciones personalizables.",
-        ["BatteryMonitorCustomize"] = "Personalizar",
-        ["CustomizeDynamicIconColors"] = "Personalizar colores del icono dinámico",
-        ["CustomizeDynamicIconColorsDescription"] = "Define los colores y niveles de batería del icono dinámico.",
-        ["CustomizeDynamicIconColorsDescription2"] = "El icono cambiará de color según los niveles configurados.",
-        ["HighBatteryColor"] = "Color de batería alta",
-        ["MediumBatteryColor"] = "Color de batería media",
-        ["LowBatteryColor"] = "Color de batería baja",
-        ["UsedFromThisLevelAndAbove"] = "Se usa a partir de este nivel.",
-        ["UsedBelowThisLevel"] = "Se usa por debajo de este nivel.",
-        ["BatteryLevel"] = "Nivel de batería:",
-        ["UseGradientDescription"] = "Transición suave entre colores en lugar de cambiar en niveles fijos.",
-        ["GradientTransitionStep"] = "Paso de transición del degradado",
-        ["GradientTransitionStepDescription"] = "Define el intervalo porcentual para la transición de color.",
-        ["Preview"] = "Vista previa",
-        ["ResetToDefaults"] = "Restaurar valores predeterminados",
-        ["BatteryPreviewNormal"] = "Normal",
-        ["BatteryPreviewCharging"] = "Cargando",
-        ["UseGradient"] = "Usar degradado entre los colores",
-        ["Ok"] = "Aceptar",
-        ["Cancel"] = "Cancelar",
-        ["Apply"] = "Aplicar",
-        ["RestoreDefaults"] = "Restaurar valores predeterminados",
-        ["RestoreDefaultsQuestion"] = "¿Restaurar todos los ajustes a sus valores predeterminados?",
-        ["InvalidSettings"] = "Configuración no válida",
-        ["ColorOrderError"] = "Los límites de los colores deben estar en orden descendente.\n\nEjemplo:\nVerde > Amarillo > Rojo.",
-        ["SaveError"] = "No se pudieron guardar los ajustes.\n\n{0}",
-        ["StartupError"] = "No se pudo cambiar la configuración de inicio de Windows.\n\n{0}",
-        ["AboutVersion"] = "Versión {0}",
-        ["AboutTagline"] = "Mantente al tanto. Sigue en el juego.",
-        ["AboutDescription"] = "HyperX Battery Monitor muestra el nivel de batería de tus dispositivos HyperX inalámbricos\nen la bandeja del sistema, para que siempre estés cargado y listo.",
-        ["AboutGitHub"] = "GitHub",
-        ["AboutSupportButton"] = "Soporte",
-        ["AboutDocumentation"] = "Documentación",
-        ["AboutHyperX"] = "HyperX",
-        ["AboutLegalTitle"] = "Legal",
-        ["AboutLegalText"] = "Este proyecto no está afiliado ni respaldado por HP Inc. o HyperX.\nHyperX es una marca registrada de HP Inc., utilizada únicamente con fines de identificación.",
-        ["AboutThirdPartyLicenses"] = "Licencias de terceros",
-        ["AboutAcknowledgementsTitle"] = "Agradecimientos",
-        ["AboutAcknowledgementsText"] = "El soporte para múltiples dispositivos en este proyecto utiliza código y referencias del proyecto HyperX-Cloud-2-Battery-Monitor, de auto94, disponible bajo la licencia MIT.",
-        ["AboutAcknowledgementsThanks"] = "Nuestro agradecimiento a auto94 por su valiosa contribución a la comunidad.",
-        ["AboutAcknowledgementsRepository"] = "https://github.com/auto94/HyperX-Cloud-2-Battery-Monitor",
-        ["TrayBattery"] = "Batería: {0}%",
-        ["TrayBatteryWithRemaining"] = "Batería: {0}% ({1})",
-        ["BatteryRemainingHours"] = "{0} h",
-        ["BatteryRemainingMinutes"] = "{0} min",
-        ["TrayBatteryNA"] = "Batería: N/D",
-        ["TrayMicrophone"] = "Mic: {0}",
-		["TrayCharging"] = "(Cargando)",
-        ["ChargingStatus"] = "Cargando...",
-        ["TrayConnected"] = "Estado: Conectado",
-        ["TrayDisconnected"] = "Estado: Desconectado",
-        ["About"] = "Acerca de",
-        ["ContextMenuSettings"] = "Configuración",
-        ["ContextMenuExit"] = "Salir",
-        ["DeviceInformationNA"] = "N/D",
-        ["Connection"] = "Conexión",
-        ["ConnectionDescription"] = "Información sobre la conexión inalámbrica de tu dispositivo.",
-        ["WirelessTechnology"] = "Tecnología Inalámbrica",
-        ["ConnectionMethod"] = "Método de Conexión",
-        ["WirelessRange"] = "Alcance Inalámbrico",
-        ["Battery"] = "Batería",
-        ["BatteryDescription"] = "Información sobre duración y carga.",
-        ["BatteryLife"] = "Duración de la Batería",
-        ["ChargeTime"] = "Tiempo de Carga",
-        ["UnknownDeviceDescription"] = "Seleccione un dispositivo para comenzar.",
-        ["DeviceLabelShort"] = "Dispositivo",
-        ["DeviceDescription"] = "Seleccione un dispositivo para monitorear.",
-        ["LocateDevice"] = "Localiza tu dispositivo",
-        ["SupportedFeatures"] = "Funciones compatibles",
-        ["BatteryMonitoringFeature"] = "Nivel de batería",
-        ["ChargingStatusFeature"] = "Batería cargando",
-        ["MicrophoneStatusFeature"] = "Estado del micrófono",
-        ["AutoDetectTooltip"] = "Detectar dispositivo automáticamente",
-        ["AutoDetectionTitle"] = "Detección automática",
-        ["AutoDetectionProgress"] = "Espera mientras se detecta tu auricular... [{0} s]",
-        ["AutoDetectionInstruction"] = "Mantén el auricular encendido y conectado durante la detección.",
-        ["AutoDetectionNoDevice"] = "No se detectó ningún dispositivo compatible. Selecciona tu dispositivo manualmente.",
-        ["AutoDetectionMultipleDevices"] = "Se detectó más de un dispositivo compatible. Selecciona manualmente el dispositivo deseado.",
-        ["AutoDetectionUnsupportedReceiver"] = "Receptor HyperX Three-In-One detectado. Este tipo de conexión aún no es compatible. Para Cloud III S o Cloud Flight 2, usa el dongle dedicado.",
-        ["DedicatedDongleDeviceFormat"] = "{0} (Dongle dedicado)",
-        ["Connected"] = "Conectado",
-        ["Disconnected"] = "Desconectado",
-        ["SidebarStatus"] = "Estado:",
-        ["SidebarBattery"] = "Batería:",
-        ["SidebarMicrophone"] = "Mic:",
-        ["MicrophoneOpen"] = "Abierto",
-        ["MicrophoneMuted"] = "Silenciado",
-        ["MicrophoneNA"] = "N/D",
-        ["SidebarUnknown"] = "Desconocido",
-        ["UnknownHeadphones"] = "Auriculares desconocidos",
-        ["ConnectedDescription"] = "Tu dispositivo está listo para usar.",
-        ["DisconnectedDescription"] = "Tu dispositivo no está conectado actualmente.",
-        ["BatteryNA"] = "N/D",
-        ["Yes"] = "Sí",
-        ["No"] = "No",
-        ["LanguageShort"] = "Idioma",
-        ["LanguageDescription"] = "Seleccione el idioma de la aplicación.",
-        ["ThemeDescription"] = "Elija el tema de la aplicación.",
-        ["StartupDescription"] = "Inicie HyperX Battery Tray automáticamente al iniciar Windows.",
-        ["StartupShort"] = "Iniciar con Windows",
-        ["ThemeShort"] = "Tema",
-        ["Notifications"] = "Notificaciones",
-        ["NotificationsDescription"] = "Configura cuándo y cómo quieres recibir notificaciones sobre tu dispositivo.",
-        ["NotifyOnLowBattery"] = "Notificar con batería baja",
-        ["NotifyOnLowBatteryDescription"] = "Mostrar una notificación cuando la batería alcance un nivel crítico.",
-        ["CriticalBatteryLevel"] = "Nivel crítico de batería",
-        ["NotifyWhenFullyCharged"] = "Notificar cuando esté completamente cargado",
-        ["NotifyWhenFullyChargedDescription"] = "Mostrar una notificación cuando los auriculares estén completamente cargados.",
-        ["FlashSystrayIcon"] = "Parpadear el icono de la bandeja del sistema",
-        ["FlashSystrayIconDescription"] = "Hacer que el icono de la bandeja del sistema parpadee cuando la batería alcance el nivel crítico.",
-        ["ShowMicrophoneMuteInSystray"] = "Mostrar micrófono silenciado en la bandeja del sistema",
-        ["ShowMicrophoneMuteInSystrayDescription"] = "Mostrar un icono de micrófono silenciado en la bandeja del sistema mientras el micrófono de los auriculares esté silenciado.",
-        ["NotificationLowBatteryTitle"] = "{0} tiene poca batería.",
-        ["NotificationLowBatteryInstruction"] = "Conecta el cable de carga para seguir usando tus auriculares.",
-        ["NotificationBattery"] = "🪫 {0}%",
-        ["NotificationFullyChargedTitle"] = "{0} está completamente cargado.",
-        ["NotificationFullyChargedBattery"] = "🔋 100%",
-        ["NotificationFullyChargedInstruction"] = "Puedes desconectar el cable de carga.",
+        foreach (string key in localized.Keys.ToArray())
+        {
+            if (!english.TryGetValue(key, out string? englishValue))
+            {
+                Debug.WriteLine(
+                    $"Localization key is not defined in English and will be ignored: " +
+                    $"{definition.ResourceFileName} / {key}");
+                localized.Remove(key);
+                continue;
+            }
 
-        // Devices Information - HyperX Cloud III Wireless
-        ["Cloud3Wireless_WirelessTechnology"] = "Inalámbrica de 2.4 GHz",
-        ["Cloud3Wireless_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["Cloud3Wireless_Range"] = "Hasta 20 metros (65,6 pies)",
-        ["Cloud3Wireless_Battery"] = "Hasta 120 horas",
-        ["Cloud3Wireless_ChargeTime"] = "Aproximadamente 4,5 horas para una carga completa",
+            if (!HasMatchingFormatPlaceholders(englishValue, localized[key]))
+            {
+                Debug.WriteLine(
+                    $"Localization format string is malformed or placeholders do not match English; English fallback will be used: " +
+                    $"{definition.ResourceFileName} / {key}");
+                localized.Remove(key);
+            }
+        }
 
-        // Devices Information - HyperX Cloud III S
-        ["Cloud3S_WirelessTechnology"] = "RF de 2.4 GHz y Bluetooth 5.3",
-        ["Cloud3S_ConnectionMethod"] = "Adaptador USB inalámbrico o Bluetooth",
-        ["Cloud3S_Range"] = "Hasta 20 metros",
-        ["Cloud3S_Battery"] = "Hasta 120 horas en 2.4 GHz; hasta 200 horas en Bluetooth",
-        ["Cloud3S_ChargeTime"] = "Aproximadamente 5 horas",
+        foreach (string key in english.Keys)
+        {
+            if (!localized.ContainsKey(key))
+            {
+                Debug.WriteLine(
+                    $"Localization key is missing; English fallback will be used: " +
+                    $"{definition.ResourceFileName} / {key}");
+            }
+        }
+    }
 
-        // Devices Information - HyperX Cloud 2 Core
-        ["Cloud2Core_WirelessTechnology"] = "Inalámbrica de 2.4 GHz",
-        ["Cloud2Core_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["Cloud2Core_Range"] = "Hasta 20 metros",
-        ["Cloud2Core_Battery"] = "Hasta 80 horas",
-        ["Cloud2Core_ChargeTime"] = "4,5 horas",
+    private static bool HasMatchingFormatPlaceholders(string english, string localized)
+    {
+        // Syntax belongs to the native parser; the regex only extracts argument indices.
+        CompositeFormat englishFormat = CompositeFormat.Parse(english);
+        CompositeFormat localizedFormat;
+        try
+        {
+            localizedFormat = CompositeFormat.Parse(localized);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
 
-        // Devices Information - HyperX Cloud Alpha
-        ["CloudAlpha_WirelessTechnology"] = "RF de 2.4 GHz",
-        ["CloudAlpha_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["CloudAlpha_Range"] = "Hasta 20 metros",
-        ["CloudAlpha_Battery"] = "Hasta 300 horas",
-        ["CloudAlpha_ChargeTime"] = "Aproximadamente 4,5 horas",
+        if (englishFormat.MinimumArgumentCount != localizedFormat.MinimumArgumentCount)
+            return false;
 
-        // Devices Information - HyperX Cloud Flight S
-        ["CloudFlightS_WirelessTechnology"] = "Inalámbrica de 2,4 GHz",
-        ["CloudFlightS_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["CloudFlightS_Range"] = "Hasta 20 metros",
-        ["CloudFlightS_Battery"] = "Hasta 30 horas",
-        ["CloudFlightS_ChargeTime"] = "Aproximadamente 3 horas",
+        int[] englishPlaceholders = ExtractFormatPlaceholders(english);
+        int[] localizedPlaceholders = ExtractFormatPlaceholders(localized);
 
-        // Devices Information - HyperX Cloud Flight Wireless
-        ["CloudFlightWireless_WirelessTechnology"] = "Inalámbrica de 2,4 GHz",
-        ["CloudFlightWireless_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["CloudFlightWireless_Range"] = "Hasta 20 metros",
-        ["CloudFlightWireless_Battery"] = "Hasta 30 horas con los LED apagados",
-        ["CloudFlightWireless_ChargeTime"] = "Aproximadamente 3 horas",
+        return englishPlaceholders.SequenceEqual(localizedPlaceholders);
+    }
 
-        // Devices Information - HyperX Cloud Stinger Core Wireless + 7.1
-        ["CloudStingerCoreWireless_WirelessTechnology"] = "Inalámbrica de 2,4 GHz",
-        ["CloudStingerCoreWireless_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["CloudStingerCoreWireless_Range"] = "Hasta 20 metros",
-        ["CloudStingerCoreWireless_Battery"] = "Hasta 17 horas",
-        ["CloudStingerCoreWireless_ChargeTime"] = "Aproximadamente 3 horas",
+    private static int[] ExtractFormatPlaceholders(string text)
+    {
+        return FormatPlaceholderRegex
+            .Matches(text)
+            .Cast<Match>()
+            .Where(match => match.Groups[1].Success)
+            .Select(match => int.Parse(
+                match.Groups[1].Value,
+                CultureInfo.InvariantCulture))
+            .OrderBy(index => index)
+            .ToArray();
+    }
 
-        // Devices Information - HyperX Cloud Flight 2
-        ["CloudFlight2_WirelessTechnology"] = "Inalámbrica de 2,4 GHz y Bluetooth 5.3",
-        ["CloudFlight2_ConnectionMethod"] = "Dongle inalámbrico USB o Bluetooth",
-        ["CloudFlight2_Range"] = "Hasta 20 metros",
-        ["CloudFlight2_Battery"] = "Hasta 100 horas en modo adaptador; hasta 150 horas mediante Bluetooth con los LED apagados",
-        ["CloudFlight2_ChargeTime"] = "Aproximadamente 3,5 horas",
-
-        // Devices Information - HyperX Cloud Mix 2
-        ["CloudMix2_WirelessTechnology"] = "Inalámbrica de 2,4 GHz y Bluetooth 5.3",
-        ["CloudMix2_ConnectionMethod"] = "Dongle inalámbrico USB, Bluetooth o cable 3,5 mm",
-        ["CloudMix2_Range"] = "Hasta 20 metros",
-        ["CloudMix2_Battery"] = "Hasta 72 horas por dongle; hasta 110 horas por Bluetooth sin control de ruido",
-        ["CloudMix2_ChargeTime"] = "Aproximadamente 3 horas",
-
-        // Devices Information - HyperX Cloud Stinger 2
-        ["CloudStinger2_WirelessTechnology"] = "Inalámbrica de 2.4 GHz",
-        ["CloudStinger2_ConnectionMethod"] = "Adaptador USB inalámbrico",
-        ["CloudStinger2_Range"] = "Hasta 20 metros",
-        ["CloudStinger2_Battery"] = "Hasta 20 horas",
-        ["CloudStinger2_ChargeTime"] = "Aproximadamente 3,5 horas"
-    };
+    private static string GetEnglishOrKey(string key)
+    {
+        return TranslationCatalogs.TryGetValue(
+                   AppLanguage.English,
+                   out IReadOnlyDictionary<string, string>? english) &&
+               english.TryGetValue(key, out string? value)
+            ? value
+            : key;
+    }
 }

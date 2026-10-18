@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -13,8 +14,8 @@ namespace HyperXBatteryTray.Settings;
 public sealed partial class SettingsForm : Form
 {
     private const int AboutActionGapLogicalWidth = 10;
-    private const int AboutLegalCardLogicalHeight = 92;
-    private const int AboutSectionBottomMarginLogicalHeight = 10;
+    private const int AboutLegalCardLogicalHeight = 88;
+    private const int AboutSectionBottomMarginLogicalHeight = 6;
 
     private void ShowAboutPage()
     {
@@ -38,7 +39,7 @@ public sealed partial class SettingsForm : Form
         };
         try
         {
-            string logoPath = Path.Combine(AppContext.BaseDirectory, "Icons", "All", "hxbm-logo-64x64.png");
+            string logoPath = AssetPaths.GetBrandingAssetPath("hxbm-logo-64x64.png");
             if (File.Exists(logoPath))
             {
                 using Image source = Image.FromFile(logoPath);
@@ -49,16 +50,13 @@ public sealed partial class SettingsForm : Form
         catch { }
         identityLayout.Controls.Add(logo, 0, 0);
         TableLayoutPanel identityText = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Color.Transparent };
-        identityText.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(30))); identityText.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(22))); identityText.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        identityText.Controls.Add(new Label { Text = "HyperX Battery Monitor", Dock = DockStyle.Fill, Font = new Font("Segoe UI Semibold", 15f), ForeColor = foreground, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        identityText.Controls.Add(new Label { Text = string.Format(L("AboutVersion"), Application.ProductVersion.Split('+')[0]), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
+        identityText.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(29))); identityText.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(19))); identityText.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        identityText.Controls.Add(new Label { Text = Application.ProductName, Dock = DockStyle.Fill, Font = new Font("Segoe UI Semibold", 15f), ForeColor = foreground, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        identityText.Controls.Add(new Label { Text = string.Format(L("AboutVersion"), AppReleaseInfo.DisplayVersion), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
         identityText.Controls.Add(new Label { Text = L("AboutTagline"), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9f), ForeColor = foreground, BackColor = Color.Transparent, TextAlign = ContentAlignment.TopLeft }, 0, 2);
         identityLayout.Controls.Add(identityText, 1, 0);
         identity.Controls.Add(identityLayout);
-        AddResponsiveRow(identity, 82);
-
-        Label description = new() { Text = L("AboutDescription"), Dock = DockStyle.Fill, AutoSize = false, Font = new Font("Segoe UI", 8.5f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.TopLeft };
-        AddResponsiveRow(description, 48);
+        AddResponsiveRow(identity, 80, 0);
 
         TableLayoutPanel actions = new()
         {
@@ -74,11 +72,11 @@ public sealed partial class SettingsForm : Form
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / actions.ColumnCount));
 
         AboutActionButton githubButton = CreateAboutActionButton(L("AboutGitHub"), AboutActionIcon.GitHub, dark, 0, 0, 118);
-        githubButton.Click += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperXBatteryTray");
+        githubButton.Click += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperBatteryMonitor");
         AboutActionButton supportButton = CreateAboutActionButton(L("AboutSupportButton"), AboutActionIcon.Support, dark, 0, 0, 118);
         supportButton.Click += (_, _) => OpenExternalUrl("https://buymeacoffee.com/davesantana");
         AboutActionButton documentationButton = CreateAboutActionButton(L("AboutDocumentation"), AboutActionIcon.Documentation, dark, 0, 0, 138);
-        documentationButton.Click += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperXBatteryTray#readme");
+        documentationButton.Click += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperBatteryMonitor#readme");
         AboutActionButton hyperXButton = CreateAboutActionButton(L("AboutHyperX"), AboutActionIcon.External, dark, 0, 0, 118);
         hyperXButton.Click += (_, _) => OpenExternalUrl("https://hyperx.com/");
 
@@ -90,19 +88,27 @@ public sealed partial class SettingsForm : Form
             button.Margin = ScaleUiPadding(0, 0, i < actionButtons.Length - 1 ? AboutActionGapLogicalWidth : 0, 0);
             actions.Controls.Add(button, i, 0);
         }
-        AddResponsiveRow(actions, 48, 0);
+        AddResponsiveRow(actions, 42, 6);
 
-        Panel separator = new() { Dock = DockStyle.Fill, Height = ScaleUi(1), BackColor = dark ? DarkBorder : LightBorder, Margin = ScaleUiPadding(0, 0, 0, 8) };
-        AddResponsiveRow(separator, 9);
+        // A narrow separator row restores breathing room between the link buttons and Legal.
+        Panel separatorRow = new() { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        separatorRow.Controls.Add(new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = ScaleUi(1),
+            Margin = ScaleUiPadding(0, 3, 0, 0),
+            BackColor = dark ? DarkBorder : LightBorder
+        });
+        AddResponsiveRow(separatorRow, 6, 0);
 
         RoundedPanel legalCard = CreateResponsiveCard(AboutLegalCardLogicalHeight);
         AddResponsiveRow(
             legalCard,
             AboutLegalCardLogicalHeight + AboutSectionBottomMarginLogicalHeight,
             AboutSectionBottomMarginLogicalHeight);
-        TableLayoutPanel legal = new() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = ScaleUiPadding(12, 8, 12, 8), BackColor = Color.Transparent };
+        TableLayoutPanel legal = new() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = ScaleUiPadding(12, 6, 12, 6), BackColor = Color.Transparent };
         legal.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ScaleUi(30))); legal.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        legal.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(StandardUiIconLogicalSize))); legal.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); legal.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(20)));
+        legal.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(StandardUiIconLogicalSize))); legal.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); legal.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(18)));
         legalCard.Controls.Add(legal);
         legal.Controls.Add(CreateTableIcon("legal", StandardUiIconLogicalSize), 0, 0);
         Label legalTitle = new() { Text = L("AboutLegalTitle"), Dock = DockStyle.Fill, Font = new Font("Segoe UI Semibold", 9f), ForeColor = foreground, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft };
@@ -110,37 +116,23 @@ public sealed partial class SettingsForm : Form
         Label legalText = new() { Text = L("AboutLegalText"), Dock = DockStyle.Fill, AutoSize = false, Font = new Font("Segoe UI", 8f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.TopLeft };
         legal.Controls.Add(legalText, 1, 1);
         LinkLabel licensesLink = new() { Text = L("AboutThirdPartyLicenses"), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8.5f), BackColor = Color.Transparent, LinkColor = dark ? Accent : Color.FromArgb(0, 102, 204), ActiveLinkColor = dark ? Accent : Color.FromArgb(0, 102, 204), VisitedLinkColor = dark ? Accent : Color.FromArgb(0, 102, 204) };
-        licensesLink.LinkClicked += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperXBatteryMonitor/blob/main/LICENSE");
+        licensesLink.LinkClicked += (_, _) => OpenExternalUrl("https://github.com/davidsantanaalves/HyperBatteryMonitor/blob/main/LICENSE");
         legal.Controls.Add(licensesLink, 1, 2);
 
-        RoundedPanel acknowledgementsCard = CreateResponsiveCard(135);
-        AddResponsiveRow(acknowledgementsCard, 0);
-        TableLayoutPanel acknowledgements = new() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, Padding = ScaleUiPadding(12, 8, 12, 8), BackColor = Color.Transparent };
-        acknowledgements.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ScaleUi(30))); acknowledgements.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        acknowledgements.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(StandardUiIconLogicalSize))); acknowledgements.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(40))); acknowledgements.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(20))); acknowledgements.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        acknowledgementsCard.Controls.Add(acknowledgements);
-        acknowledgements.Controls.Add(CreateTableIcon("code", StandardUiIconLogicalSize), 0, 0);
-        acknowledgements.Controls.Add(new Label { Text = L("AboutAcknowledgementsTitle"), Dock = DockStyle.Fill, Font = new Font("Segoe UI Semibold", 9.5f), ForeColor = foreground, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 1, 0);
-        acknowledgements.Controls.Add(new Label { Text = L("AboutAcknowledgementsText"), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.TopLeft }, 1, 1);
-        acknowledgements.Controls.Add(new Label { Text = L("AboutAcknowledgementsThanks"), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8f), ForeColor = secondary, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft }, 1, 2);
-        TableLayoutPanel repository = new()
+        // Updates follow Legal, with the flexible spacer after both cards.
+        BuildAboutUpdatesCard();
+
+        // Keep any unused vertical space outside the About cards. Without a trailing
+        // flexible row, WinForms can visually stretch the final content row to fill
+        // the remaining page height after the acknowledgements section was removed.
+        int spacerRow = page.RowCount++;
+        page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        page.Controls.Add(new Panel
         {
-            Dock = DockStyle.Top,
-            Height = ScaleUi(StandardUiIconLogicalSize),
-            ColumnCount = 2,
-            RowCount = 1,
+            Dock = DockStyle.Fill,
             Margin = new Padding(0),
             BackColor = Color.Transparent
-        };
-        repository.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ScaleUi(30)));
-        repository.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        repository.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        repository.Controls.Add(CreateTableIcon("git", StandardUiIconLogicalSize), 0, 0);
-        LinkLabel repositoryLink = new() { Text = L("AboutAcknowledgementsRepository"), Dock = DockStyle.Fill, Font = new Font("Segoe UI", 8f), BackColor = Color.Transparent, LinkColor = dark ? Accent : Color.FromArgb(0, 102, 204), ActiveLinkColor = dark ? Accent : Color.FromArgb(0, 102, 204), VisitedLinkColor = dark ? Accent : Color.FromArgb(0, 102, 204), AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft };
-        repositoryLink.LinkClicked += (_, _) => OpenExternalUrl(L("AboutAcknowledgementsRepository"));
-        repository.Controls.Add(repositoryLink, 1, 0);
-        acknowledgements.Controls.Add(repository, 0, 3);
-        acknowledgements.SetColumnSpan(repository, 2);
+        }, 0, spacerRow);
     }
 
     private AboutActionButton CreateAboutActionButton(string text, AboutActionIcon icon, bool dark, int x, int y, int width)
