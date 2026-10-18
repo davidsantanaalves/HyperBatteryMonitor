@@ -1,12 +1,7 @@
-using System.ComponentModel;
+using HyperXBatteryTray;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Drawing.Text;
-using System.Xml.Linq;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
-using HyperXBatteryTray.Devices;
 
 namespace HyperXBatteryTray.Settings;
 
@@ -14,6 +9,10 @@ public sealed partial class SettingsForm : Form
 {
     private sealed class DynamicColorPreviewControl : Control
     {
+        private const int PreviewIconLogicalSize = 30;
+        private const int PreviewLabelLogicalHeight = 24;
+        private const int PreviewLabelTopGapLogical = 2;
+
         private readonly bool _dark;
         private readonly AppLanguage _language;
         private readonly List<BatteryColorSettings> _colors;
@@ -86,11 +85,15 @@ public sealed partial class SettingsForm : Form
             Bitmap? charging = _dark ? _darkCharging : _lightCharging;
             Bitmap? normal = _dark ? _darkIcon : _lightIcon;
 
+            int iconSize = ScaleLogical(PreviewIconLogicalSize);
+            int labelTop = iconSize + ScaleLogical(PreviewLabelTopGapLogical);
+            int labelHeight = Math.Max(ScaleLogical(PreviewLabelLogicalHeight), Height - labelTop);
             float slotWidth = Math.Max(1f, Width / (float)samples.Length);
+
             for (int i = 0; i < samples.Length; i++)
             {
                 float x = i * slotWidth;
-                RectangleF iconRect = new(x + (slotWidth - 30f) / 2f, 0, 30, 30);
+                RectangleF iconRect = new(x + (slotWidth - iconSize) / 2f, 0, iconSize, iconSize);
 
                 if (i == samples.Length - 1)
                 {
@@ -104,7 +107,11 @@ public sealed partial class SettingsForm : Form
                     e.Graphics.DrawImage(tinted, iconRect);
                 }
 
-                Rectangle labelRect = new((int)x, 30, (int)Math.Ceiling(slotWidth), 13);
+                Rectangle labelRect = new(
+                    (int)Math.Floor(x),
+                    labelTop,
+                    (int)Math.Ceiling(slotWidth),
+                    Math.Max(1, labelHeight));
                 using Font font = new("Segoe UI", 7.2f);
                 TextRenderer.DrawText(
                     e.Graphics,
@@ -113,11 +120,15 @@ public sealed partial class SettingsForm : Form
                     labelRect,
                     _dark ? Color.WhiteSmoke : LightText,
                     TextFormatFlags.HorizontalCenter |
-                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.Top |
+                    TextFormatFlags.WordBreak |
                     TextFormatFlags.NoPrefix |
                     TextFormatFlags.EndEllipsis);
             }
         }
+
+        private int ScaleLogical(int logicalValue) =>
+            PngIconCache.ScaleLogicalToInt(logicalValue, DeviceDpi);
 
         private Color GetBatteryColor(int battery, List<BatteryColorSettings> colors)
         {
@@ -183,17 +194,17 @@ public sealed partial class SettingsForm : Form
 
         private void LoadBitmaps()
         {
-            _darkIcon = LoadIcon("Dark", "dark.ico");
-            _lightIcon = LoadIcon("Light", "light.ico");
-            _darkCharging = LoadIcon("Dark", "dark_charging.ico");
-            _lightCharging = LoadIcon("Light", "light_charging.ico");
+            _darkIcon = LoadIcon(true, "dark.ico");
+            _lightIcon = LoadIcon(false, "light.ico");
+            _darkCharging = LoadIcon(true, "dark_charging.ico");
+            _lightCharging = LoadIcon(false, "light_charging.ico");
         }
 
-        private static Bitmap? LoadIcon(string folder, string file)
+        private static Bitmap? LoadIcon(bool darkMode, string file)
         {
             try
             {
-                string path = Path.Combine(AppContext.BaseDirectory, "Icons", folder, file);
+                string path = AssetPaths.GetThemeIconPath(darkMode, file);
                 if (!File.Exists(path))
                     return null;
 

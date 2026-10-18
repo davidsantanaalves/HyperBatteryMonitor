@@ -14,6 +14,7 @@ public sealed class BatteryMonitor : IDisposable
     private bool? _lastMicrophoneMuteState;
     private bool _lastConnectionState;
     private bool _microphoneStateInitialized;
+    private int _lastBluetoothTransportGeneration = -1;
 
     public BatteryMonitor(IHyperXDevice device)
     {
@@ -81,6 +82,22 @@ public sealed class BatteryMonitor : IDisposable
                         cancellationToken);
 
                     continue;
+                }
+
+                // The optional Bluetooth adapter can promote a verified USB
+                // receiver without a full disconnect. Reinitialize only the
+                // metadata that is transport-specific; original HID drivers
+                // never enter this branch.
+                if (_device is BluetoothFallbackDevice fallback &&
+                    fallback.TransportGeneration != _lastBluetoothTransportGeneration)
+                {
+                    _lastBluetoothTransportGeneration = fallback.TransportGeneration;
+                    // Force a status refresh even if both transports report
+                    // the same percentage (tray/runtime estimate may differ).
+                    _lastBattery = null;
+                    _microphoneStateInitialized = false;
+                    _lastChargingState = null;
+                    _lastMicrophoneMuteState = null;
                 }
 
                 UpdateBatteryState(battery.Value);

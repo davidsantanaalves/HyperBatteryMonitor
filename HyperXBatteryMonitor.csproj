@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
@@ -6,50 +6,74 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.3.0</Version>
-    <AssemblyName>HyperX Battery Monitor</AssemblyName>
-    <Product>HyperX Battery Monitor</Product>
-    <Title>HyperX Battery Monitor</Title>
-    <ApplicationIcon>Icons\All\hxbm-logo.ico</ApplicationIcon>
+    <Version>2.4.0</Version>
+    <!-- Single source of truth for build channel and Beta sequence. -->
+    <ReleaseChannel>Stable</ReleaseChannel>
+    <BetaNumber>6</BetaNumber>
+    <InformationalVersion Condition="'$(ReleaseChannel)' == 'Stable'">$(Version)</InformationalVersion>
+    <InformationalVersion Condition="'$(ReleaseChannel)' == 'Beta'">$(Version)-beta.$(BetaNumber)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <AssemblyName>Hyper Battery Monitor</AssemblyName>
+    <Product>Hyper Battery Monitor</Product>
+    <Title>Hyper Battery Monitor</Title>
+    <ApplicationIcon>Assets\Branding\hxbm-logo.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
 
+  <!-- Embed channel identity into the executable; consumers never read the .csproj at runtime. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HBMReleaseChannel</_Parameter1>
+      <_Parameter2>$(ReleaseChannel)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HBMBetaNumber</_Parameter1>
+      <_Parameter2>$(BetaNumber)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- Evaluate the regular expression outside Condition to avoid nested MSBuild condition quotes. -->
+  <PropertyGroup>
+    <_HBMBetaNumberIsValid>$([System.Text.RegularExpressions.Regex]::IsMatch('$(BetaNumber)', '^[1-9][0-9]*$'))</_HBMBetaNumberIsValid>
+  </PropertyGroup>
+
+  <Target Name="ValidateHBMReleaseProperties" BeforeTargets="GenerateAssemblyInfo">
+    <Error Condition="'$(ReleaseChannel)' != 'Stable' and '$(ReleaseChannel)' != 'Beta'" Text="ReleaseChannel must be Stable or Beta." />
+    <Error Condition="'$(ReleaseChannel)' == 'Beta' and '$(_HBMBetaNumberIsValid)' != 'True'" Text="BetaNumber must be a positive integer without leading zeros." />
+  </Target>
+
+  <ItemGroup>
+    <None Remove="Languages\*.json" />
+    <EmbeddedResource Include="Languages\*.json">
+      <LogicalName>HyperXBatteryTray.Languages.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Icons\**\*.ico">
+    <None Update="THIRD_PARTY_NOTICES.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="Assets\Branding\*.ico;Assets\Icons\**\*.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Assets\Icons\Dark\*.png;Assets\Icons\Light\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
   <ItemGroup>
-    <None Remove="Icons\Dark\general-dark-25x25.png" />
-    <None Remove="Icons\Dark\general-dark-36x36.png" />
-    <None Remove="Icons\Light\general-light-25x25.png" />
-    <None Remove="Icons\Light\general-light-36x36.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Update="Icons\Dark\*.png;Icons\Light\*.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Icons\Dark\*-bkp.png;Icons\Light\*-bkp.png">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
-    </None>
-    <None Update="Icons\Vector\battery.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="Icons\All\hxbm-logo-64x64.png">
+    <Content Include="Assets\Branding\hxbm-logo-64x64.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Devices\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Icons\All\auto-detect-*.png;Icons\All\supported-*.png;Icons\All\unsupported-*.png">
+    <Content Include="Assets\Icons\Common\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

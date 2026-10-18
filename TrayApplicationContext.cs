@@ -11,7 +11,7 @@ public class TrayApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = "HyperX Battery Monitor",
+            Text = Application.ProductName,
             Visible = true,
             ContextMenuStrip = CreateContextMenu()
         };

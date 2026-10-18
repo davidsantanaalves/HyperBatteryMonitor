@@ -12,7 +12,12 @@ namespace HyperXBatteryTray.Settings;
 
 public sealed partial class SettingsForm : Form
 {
-    private sealed class LanguagePopupControl : Control
+    private const int LanguagePopupItemLogicalHeight = 30;
+    private const int LanguagePopupBorderLogicalWidth = 1;
+    private const int LanguagePopupMinimumVisibleItems = 3;
+    private const int LanguagePopupEdgeMarginLogical = 4;
+
+    private sealed class LanguagePopupControl : ScrollableControl
     {
         private string[] _items = Array.Empty<string>();
         private int _selectedIndex = -1;
@@ -26,7 +31,7 @@ public sealed partial class SettingsForm : Form
             set
             {
                 _items = value ?? Array.Empty<string>();
-                Height = _items.Length * ItemHeight;
+                AutoScrollMinSize = new Size(0, _items.Length * ItemHeight + BorderWidth * 2);
                 Invalidate();
             }
         }
@@ -56,11 +61,8 @@ public sealed partial class SettingsForm : Form
         public event Action<int>? ItemClicked;
         public event EventHandler? Dismissed;
 
-        private const int LogicalItemHeight = 30;
-        private const int LogicalBorderWidth = 1;
-
-        private int ItemHeight => PngIconCache.ScaleLogicalToInt(LogicalItemHeight, DeviceDpi);
-        private int BorderWidth => PngIconCache.ScaleLogicalToInt(LogicalBorderWidth, DeviceDpi);
+        private int ItemHeight => PngIconCache.ScaleLogicalToInt(LanguagePopupItemLogicalHeight, DeviceDpi);
+        private int BorderWidth => PngIconCache.ScaleLogicalToInt(LanguagePopupBorderLogicalWidth, DeviceDpi);
 
         public LanguagePopupControl()
         {
@@ -70,6 +72,7 @@ public sealed partial class SettingsForm : Form
                      ControlStyles.ResizeRedraw, true);
             TabStop = true;
             Cursor = Cursors.Hand;
+            AutoScroll = true;
             BackColor = Color.FromArgb(38, 41, 44);
         }
 
@@ -93,10 +96,13 @@ public sealed partial class SettingsForm : Form
             e.Graphics.FillRectangle(backgroundBrush, ClientRectangle);
             e.Graphics.DrawRectangle(borderPen, 0, 0, Width - 1, Height - 1);
 
+            int scrollY = AutoScrollPosition.Y;
             for (int i = 0; i < _items.Length; i++)
             {
-                Rectangle itemBounds = new(BorderWidth, BorderWidth + i * ItemHeight,
-                    Math.Max(1, Width - BorderWidth * 2), ItemHeight);
+                Rectangle itemBounds = new(BorderWidth, BorderWidth + i * ItemHeight + scrollY,
+                    Math.Max(1, ClientSize.Width - BorderWidth * 2), ItemHeight);
+                if (itemBounds.Bottom < 0 || itemBounds.Top > ClientSize.Height)
+                    continue;
                 bool highlighted = i == _hoverIndex || (i == _selectedIndex && _hoverIndex < 0);
 
                 if (highlighted)
@@ -114,6 +120,42 @@ public sealed partial class SettingsForm : Form
 
         private int ScaleLogical(int logicalValue) =>
             PngIconCache.ScaleLogicalToInt(logicalValue, DeviceDpi);
+
+        protected override void OnScroll(ScrollEventArgs se)
+        {
+            base.OnScroll(se);
+            Invalidate();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            Invalidate();
+        }
+
+        public void ScrollSelectedIntoView()
+        {
+            EnsureItemVisible(_selectedIndex);
+        }
+
+        private void EnsureItemVisible(int index)
+        {
+            if (index < 0 || index >= _items.Length) return;
+
+            int visibleTop = VerticalScroll.Value;
+            int visibleHeight = ClientSize.Height;
+            int itemTop = BorderWidth + index * ItemHeight;
+            int itemBottom = itemTop + ItemHeight;
+
+            if (itemTop < visibleTop)
+            {
+                AutoScrollPosition = new Point(0, itemTop);
+            }
+            else if (itemBottom > visibleTop + visibleHeight)
+            {
+                AutoScrollPosition = new Point(0, Math.Max(0, itemBottom - visibleHeight));
+            }
+        }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -154,6 +196,7 @@ public sealed partial class SettingsForm : Form
             {
                 int next = Math.Min(_items.Length - 1, Math.Max(0, (_hoverIndex >= 0 ? _hoverIndex : _selectedIndex) + 1));
                 _hoverIndex = next;
+                EnsureItemVisible(next);
                 Invalidate();
                 e.Handled = true;
             }
@@ -161,6 +204,7 @@ public sealed partial class SettingsForm : Form
             {
                 int next = Math.Max(0, (_hoverIndex >= 0 ? _hoverIndex : _selectedIndex) - 1);
                 _hoverIndex = next;
+                EnsureItemVisible(next);
                 Invalidate();
                 e.Handled = true;
             }
@@ -180,9 +224,10 @@ public sealed partial class SettingsForm : Form
 
         private int IndexFromPoint(Point point)
         {
-            int index = (point.Y - BorderWidth) / ItemHeight;
-            return point.X >= BorderWidth && point.X < Width - BorderWidth &&
-                   index >= 0 && index < _items.Length ? index : -1;
+            int contentY = point.Y - AutoScrollPosition.Y - BorderWidth;
+            int index = contentY / ItemHeight;
+            return point.X >= BorderWidth && point.X < ClientSize.Width - BorderWidth &&
+                   contentY >= 0 && index >= 0 && index < _items.Length ? index : -1;
         }
     }
 }

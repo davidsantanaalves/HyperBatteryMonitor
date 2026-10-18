@@ -16,4 +16,4 @@
 
 Charging monitoring is unavailable for Cloud Mix 2. Microphone mute monitoring is unavailable for Cloud Stinger 2, Cloud Flight S, Cloud Flight Wireless, and Cloud Stinger Core Wireless + 7.1.
 
-**Full Changelog**: https://github.com/davidsantanaalves/HyperXBatteryMonitor/compare/v2.2.0...v2.3.0
+**Full Changelog**: https://github.com/davidsantanaalves/HyperBatteryMonitor/compare/v2.2.0...v2.3.0

@@ -1,3 +1,4 @@
+using HyperXBatteryTray;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -15,7 +16,7 @@ public sealed partial class SettingsForm : Form
     private void LanguageComboBox_SelectedIndexChanged(object? sender, EventArgs e)
     {
         if (_updatingLanguage || _languageComboBox.SelectedIndex < 0) return;
-        _selectedLanguage = (AppLanguage)_languageComboBox.SelectedIndex;
+        _selectedLanguage = Localization.LanguageAt(_languageComboBox.SelectedIndex);
         ApplyLocalizedText();
         ShowPage(_currentPage);
         ApplyTheme(_selectedTheme);
@@ -34,10 +35,12 @@ public sealed partial class SettingsForm : Form
     private void ApplyLocalizedText()
     {
         Text = GetWindowTitle();
-        _resetButton.Text = L("RestoreDefaults");
+        _resetButton.Text = L("ResetToDefaults");
         _okButton.Text = L("Ok");
         _cancelButton.Text = L("Cancel");
         _applyButton.Text = L("Apply");
+        _footer?.PerformLayout();
+        PositionFooter();
         foreach ((string key, SidebarItem item) in _navButtons)
             item.Text = L(GetSidebarLocalizationKey(key));
         if (_sidebarStatusTitleLabel != null)
@@ -58,12 +61,16 @@ public sealed partial class SettingsForm : Form
         if (_systemThemeOption != null) _systemThemeOption.LabelText = ThemeText(AppTheme.System);
         if (_startupToggle != null) _startupToggle.Invalidate();
 
-        if (_languageComboBox != null && _languageComboBox.Items.Count == 3)
+        if (_languageComboBox != null &&
+            _languageComboBox.Items.Count == Localization.SupportedLanguages.Count)
         {
             _updatingLanguage = true;
-            _languageComboBox.Items[0] = Localization.LanguageDisplay(AppLanguage.English);
-            _languageComboBox.Items[1] = Localization.LanguageDisplay(AppLanguage.PortugueseBrazil);
-            _languageComboBox.Items[2] = Localization.LanguageDisplay(AppLanguage.Spanish);
+            for (int i = 0; i < Localization.SupportedLanguages.Count; i++)
+            {
+                _languageComboBox.Items[i] =
+                    Localization.LanguageDisplay(Localization.SupportedLanguages[i]);
+            }
+            _languageComboBox.SelectedIndex = Localization.LanguageIndex(_selectedLanguage);
             _updatingLanguage = false;
         }
     }
@@ -90,7 +97,7 @@ public sealed partial class SettingsForm : Form
         if (_footer != null) _footer.BackColor = background;
         _versionLabel.ForeColor = secondary;
         _applicationNameLabel.ForeColor = foreground;
-        _versionLabel.Text = "v" + Application.ProductVersion.Split('+')[0];
+        _versionLabel.Text = "v" + AppReleaseInfo.DisplayVersion;
 
         Icon = LoadApplicationIcon();
         WarmUpIcons();
@@ -333,7 +340,11 @@ public sealed partial class SettingsForm : Form
 
         AppSettings defaults = AppSettings.CreateDefault();
         _pendingSelectedDevice = defaults.SelectedDevice;
-        _pendingStartupEnabled = AppSettings.DefaultStartWithWindows;
+        _pendingUpdateChannel = defaults.UpdateChannel;
+        _pendingUpdateChannelUserSelected = false;
+        _pendingUpdateDownloadMode = defaults.UpdateDownloadMode;
+        _pendingStartupEnabled = !ApplicationRuntime.IsTestMode &&
+            AppSettings.DefaultStartWithWindows;
         _pendingNotifyOnLowBattery = defaults.NotifyOnLowBattery;
         _pendingNotifyWhenFullyCharged = defaults.NotifyWhenFullyCharged;
         _pendingBlinkOnCriticalBattery = defaults.BlinkOnCriticalBattery;
@@ -382,6 +393,9 @@ public sealed partial class SettingsForm : Form
     private bool ApplySettings()
     {
         _settings.SelectedDevice = _pendingSelectedDevice;
+        _settings.UpdateChannel = _pendingUpdateChannel;
+        _settings.UpdateChannelUserSelected = _pendingUpdateChannelUserSelected;
+        _settings.UpdateDownloadMode = _pendingUpdateDownloadMode;
         _settings.DisplayMode = _pendingDisplayMode;
         _settings.AdvancedDisplayMode = _pendingAdvancedDisplayMode;
         _settings.BatteryColors = CloneBatteryColors(_pendingBatteryColors);
@@ -397,14 +411,17 @@ public sealed partial class SettingsForm : Form
         _settings.ThemeConfigured = true;
         try
         {
-            if (_pendingStartupEnabled) _startupManager.Enable();
-            else _startupManager.Disable();
+            if (!ApplicationRuntime.IsTestMode)
+            {
+                if (_pendingStartupEnabled) _startupManager.Enable();
+                else _startupManager.Disable();
+            }
 
             _settings.IsNewSettingsProfile = false;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, string.Format(L("StartupError"), ex.Message), "HyperX Battery Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, string.Format(L("StartupError"), ex.Message), Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
         StopDevicePreview();
@@ -414,6 +431,8 @@ public sealed partial class SettingsForm : Form
 
     private void SettingsForm_FormClosed(object? sender, FormClosedEventArgs e)
     {
+        if (_updateCoordinator is not null)
+            _updateCoordinator.Changed -= OnUpdateStatusChanged;
         StopDevicePreview();
         UnsubscribeFromDeviceStatusEvents(_device);
 
@@ -470,10 +489,10 @@ public sealed partial class SettingsForm : Form
         _ => L("ThemeLight")
     };
 
-    private string GetWindowTitle() => string.Format(
+    private string GetWindowTitle() => ApplicationRuntime.TestIndicator + string.Format(
         L("WindowTitle"),
         Application.ProductName,
-        Application.ProductVersion.Split('+')[0]);
+        AppReleaseInfo.DisplayVersion);
 
     private string L(string key) => Localization.Get(key, _selectedLanguage);
     private AppTheme EffectiveTheme => ResolveTheme(_selectedTheme);
@@ -493,7 +512,7 @@ public sealed partial class SettingsForm : Form
 
     private static Icon? LoadApplicationIcon()
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "Icons", "All", "hxbm-logo.ico");
+        string path = AssetPaths.GetBrandingAssetPath("hxbm-logo.ico");
         if (!File.Exists(path)) return null;
         using FileStream stream = File.OpenRead(path);
         return new Icon(stream);
@@ -501,7 +520,8 @@ public sealed partial class SettingsForm : Form
 
     private static Icon? LoadThemeIcon(AppTheme theme)
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "Icons", theme == AppTheme.Dark ? "Dark" : "Light", theme == AppTheme.Dark ? "dark.ico" : "light.ico");
+        bool dark = theme == AppTheme.Dark;
+        string path = AssetPaths.GetThemeIconPath(dark, dark ? "dark.ico" : "light.ico");
         if (!File.Exists(path)) return null;
         using FileStream stream = File.OpenRead(path);
         return new Icon(stream);

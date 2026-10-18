@@ -1,12 +1,5 @@
-using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
-using System.Drawing.Text;
-using System.Xml.Linq;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
-using HyperXBatteryTray.Devices;
 
 namespace HyperXBatteryTray.Settings;
 
@@ -17,18 +10,49 @@ public sealed partial class SettingsForm : Form
 
     private sealed class CustomizeDynamicIconColorsDialog : Form
     {
+        // Win32 WS_EX_COMPOSITED. The modal contains several nested WinForms/native
+        // child windows (including TextBox instances). Form.DoubleBuffered buffers the
+        // form itself, but not the entire child-window hierarchy. Compositing the dialog
+        // makes Windows present that hierarchy as a completed frame instead of exposing
+        // child-by-child painting during the first display.
+        private const int WsExComposited = 0x02000000;
+
+        private const int DialogLogicalWidth = 500;
+        private const int DialogInitialLogicalHeight = 560;
+        private const int DialogMinimumLogicalHeight = 500;
+        private const int HeaderLogicalHeight = 46;
+        private const int FooterLogicalHeight = 58;
+        private const int SeparatorLogicalHeight = 1;
+        private const int WorkingAreaMarginLogical = 24;
+        private const int ContentHorizontalPaddingLogical = 18;
+        private const int ContentVerticalPaddingLogical = 10;
+        private const int CardInnerPaddingLogical = 12;
+        private const int SwatchColumnLogicalWidth = 54;
+        private const int ThresholdColumnLogicalWidth = 116;
+        private const int NumericLogicalWidth = 72;
+        private const int NumericLogicalHeight = 26;
+        private const int ToggleColumnLogicalWidth = 60;
+        private const int ToggleLogicalWidth = 54;
+        private const int ToggleLogicalHeight = 28;
+        private const int PreviewLogicalHeight = 58;
+        private const int IntroTextMaximumLogicalWidth = 456;
+        private const int ColorTextMaximumLogicalWidth = 250;
+        private const int WideTextMaximumLogicalWidth = 350;
+        private const int FooterButtonLogicalHeight = 36;
+        private const int FooterButtonGapLogical = 10;
+
         private readonly PngIconCache _iconCache;
         private readonly bool _dark;
         private readonly AppLanguage _language;
         private readonly List<BatteryColorSettings> _colors;
         private readonly List<ColorSwatchControl> _swatches = new();
         private readonly List<CriticalBatteryNumericControl> _levels = new();
+        private Panel _contentHost = null!;
+        private ThemedVerticalScrollBar _contentScrollBar = null!;
+        private TableLayoutPanel _contentLayout = null!;
         private ToggleSwitchControl _gradientToggle = null!;
         private CriticalBatteryNumericControl _gradientStepInput = null!;
         private DynamicColorPreviewControl _preview = null!;
-        private Label _highDescription = null!;
-        private Label _mediumDescription = null!;
-        private Label _lowDescription = null!;
 
         public IReadOnlyList<BatteryColorSettings> BatteryColors =>
             _colors.Select(c => new BatteryColorSettings
@@ -75,34 +99,54 @@ public sealed partial class SettingsForm : Form
             Text = L("CustomizeDynamicIconColors");
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.None;
-            ClientSize = new Size(460, 522);
+            ClientSize = new Size(DialogLogicalWidth, DialogInitialLogicalHeight);
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
             ShowIcon = false;
-            TopMost = true;
+            // ShowDialog(settingsForm) keeps this modal above its owner only.
             DoubleBuffered = true;
-            AutoScaleMode = AutoScaleMode.None;
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw,
+                true);
+            AutoScaleDimensions = new SizeF(LogicalDpi, LogicalDpi);
+            AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = _dark ? DarkBackground : LightBackground;
             ForeColor = _dark ? Color.WhiteSmoke : LightText;
             Font = new Font("Segoe UI", 9f);
 
-            Paint += (_, e) =>
-            {
-                using Pen separator = new(
-                    _dark ? Color.FromArgb(53, 58, 63) : Color.FromArgb(220, 225, 232), 1f);
-                e.Graphics.DrawLine(separator, 0, 45, ClientSize.Width, 45);
-                e.Graphics.DrawLine(separator, 0, 466, ClientSize.Width, 466);
-            };
-
-            BuildHeader();
-            BuildContent(useGradient, gradientPercent);
-            BuildFooter();
-            UpdateDescriptions();
-            _preview!.RefreshPreview();
+            BuildLayout(useGradient, gradientPercent);
+            _preview.RefreshPreview();
         }
 
         private string L(string key) => Localization.Get(key, _language);
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams parameters = base.CreateParams;
+                parameters.ExStyle |= WsExComposited;
+                return parameters;
+            }
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+
+            // Complete the DPI-aware responsive layout before the first visible paint.
+            // Running this from OnShown would expose the intermediate control layout to the user.
+            FitToWorkingArea();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            _contentScrollBar.RefreshState();
+        }
 
         protected override void OnSizeChanged(EventArgs e)
         {
@@ -132,77 +176,183 @@ public sealed partial class SettingsForm : Form
             e.Graphics.DrawPath(border, path);
         }
 
-        private void BuildHeader()
+        private void BuildLayout(bool useGradient, int gradientPercent)
         {
+            TableLayoutPanel shell = new()
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 5,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+            shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, HeaderLogicalHeight));
+            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, SeparatorLogicalHeight));
+            shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, SeparatorLogicalHeight));
+            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, FooterLogicalHeight));
+            Controls.Add(shell);
+
+            shell.Controls.Add(BuildHeader(), 0, 0);
+            shell.Controls.Add(CreateSeparator(), 0, 1);
+
+            _contentHost = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                AutoScroll = true,
+                BackColor = _dark ? DarkBackground : LightBackground
+            };
+
+            _contentLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 0,
+                Margin = new Padding(0),
+                Padding = new Padding(
+                    ContentHorizontalPaddingLogical,
+                    ContentVerticalPaddingLogical,
+                    ContentHorizontalPaddingLogical,
+                    ContentVerticalPaddingLogical),
+                BackColor = Color.Transparent
+            };
+            _contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _contentHost.Controls.Add(_contentLayout);
+            Panel contentWrapper = new()
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                BackColor = _dark ? DarkBackground : LightBackground
+            };
+            contentWrapper.Controls.Add(_contentHost);
+            shell.Controls.Add(contentWrapper, 0, 2);
+            _contentScrollBar = new ThemedVerticalScrollBar(_contentHost, _dark);
+
+            BuildContent(useGradient, gradientPercent);
+
+            shell.Controls.Add(CreateSeparator(), 0, 3);
+            shell.Controls.Add(BuildFooter(), 0, 4);
+        }
+
+        private Control BuildHeader()
+        {
+            TableLayoutPanel header = new()
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(16, 0, 8, 0),
+                BackColor = Color.Transparent
+            };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32));
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
             PngIconControl icon = new(_iconCache, "theme")
             {
-                Location = new Point(16, 9),
+                Anchor = AnchorStyles.Left,
                 Size = new Size(27, 27),
+                Margin = new Padding(0),
                 DarkMode = _dark
             };
-            Controls.Add(icon);
+            header.Controls.Add(icon, 0, 0);
 
             Label title = new()
             {
                 Text = L("CustomizeDynamicIconColors"),
-                Location = new Point(54, 11),
-                AutoSize = true,
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleLeft,
                 Font = new Font("Segoe UI Semibold", 12.2f),
                 ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(0)
             };
-            Controls.Add(title);
+            header.Controls.Add(title, 1, 0);
 
             Button close = new()
             {
                 Text = "×",
+                Dock = DockStyle.Fill,
                 FlatStyle = FlatStyle.Flat,
                 FlatAppearance = { BorderSize = 0 },
                 BackColor = Color.Transparent,
                 ForeColor = _dark ? Color.WhiteSmoke : LightText,
                 Font = new Font("Segoe UI", 16f),
-                Location = new Point(422, 5),
-                Size = new Size(28, 32),
                 Cursor = Cursors.Hand,
-                TabStop = false
+                TabStop = false,
+                Margin = new Padding(0)
             };
             close.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(close);
+            header.Controls.Add(close, 2, 0);
+
+            return header;
+        }
+
+        private Panel CreateSeparator()
+        {
+            return new Panel
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                BackColor = _dark ? Color.FromArgb(53, 58, 63) : Color.FromArgb(220, 225, 232)
+            };
         }
 
         private void BuildContent(bool useGradient, int gradientPercent)
         {
-            Label introTitle = new()
-            {
-                Text = L("CustomizeDynamicIconColorsDescription"),
-                Location = new Point(22, 57),
-                AutoSize = true,
-                Font = new Font("Segoe UI", 9.7f),
-                ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                BackColor = Color.Transparent
-            };
-            Controls.Add(introTitle);
+            AddContentControl(CreateWrappedLabel(
+                L("CustomizeDynamicIconColorsDescription"),
+                new Font("Segoe UI", 9.7f),
+                _dark ? Color.WhiteSmoke : LightText,
+                new Padding(4, 0, 4, 3),
+                IntroTextMaximumLogicalWidth));
 
-            Label introDescription = new()
-            {
-                Text = L("CustomizeDynamicIconColorsDescription2"),
-                Location = new Point(22, 79),
-                AutoSize = true,
-                Font = new Font("Segoe UI", 8.5f),
-                ForeColor = _dark ? DarkSecondary : LightSecondary,
-                BackColor = Color.Transparent
-            };
-            Controls.Add(introDescription);
+            AddContentControl(CreateWrappedLabel(
+                L("CustomizeDynamicIconColorsDescription2"),
+                new Font("Segoe UI", 8.5f),
+                _dark ? DarkSecondary : LightSecondary,
+                new Padding(4, 0, 4, 10),
+                IntroTextMaximumLogicalWidth));
 
+            AddContentControl(BuildSettingsCard(useGradient, gradientPercent));
+            AddContentControl(BuildPreviewCard());
+        }
+
+        private RoundedPanel BuildSettingsCard(bool useGradient, int gradientPercent)
+        {
             RoundedPanel settingsCard = new()
             {
-                Location = new Point(18, 101),
-                Size = new Size(424, 271),
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0, 0, 0, 10),
                 BorderColor = _dark ? DarkBorder : LightBorder,
-                OutsideBackColor = _dark ? Color.FromArgb(34, 37, 40) : Color.White,
+                OutsideBackColor = _dark ? DarkBackground : LightBackground,
                 BackColor = _dark ? Color.FromArgb(42, 45, 48) : Color.FromArgb(248, 249, 251)
             };
-            Controls.Add(settingsCard);
+
+            TableLayoutPanel layout = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 0,
+                Margin = new Padding(0),
+                Padding = new Padding(CardInnerPaddingLogical),
+                BackColor = Color.Transparent
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            settingsCard.Controls.Add(layout);
 
             string[] titles =
             {
@@ -212,216 +362,319 @@ public sealed partial class SettingsForm : Form
             };
 
             for (int i = 0; i < 3; i++)
+                AddAutoSizeRow(layout, BuildColorRow(i, titles[i]));
+
+            Panel separator = new()
             {
-                int y = 9 + i * 50;
-                int index = i;
-
-                ColorSwatchControl swatch = new(_colors[i].Color, _dark)
-                {
-                    Location = new Point(12, y),
-                    Size = new Size(48, 48)
-                };
-                swatch.ColorChanged += (_, _) =>
-                {
-                    _colors[index].Color = swatch.Color;
-                    _preview.RefreshPreview();
-                };
-                settingsCard.Controls.Add(swatch);
-                _swatches.Add(swatch);
-
-                Label title = new()
-                {
-                    Text = titles[i],
-                    Location = new Point(70, y + 5),
-                    AutoSize = true,
-                    Font = new Font("Segoe UI Semibold", 9.1f),
-                    ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                    BackColor = Color.Transparent
-                };
-                settingsCard.Controls.Add(title);
-
-                Label description = new()
-                {
-                    Text = i == 2 ? L("UsedBelowThisLevel") : L("UsedFromThisLevelAndAbove"),
-                    Location = new Point(70, y + 26),
-                    AutoSize = true,
-                    Font = new Font("Segoe UI", 7.8f),
-                    ForeColor = _dark ? DarkSecondary : LightSecondary,
-                    BackColor = Color.Transparent
-                };
-                if (i == 0) _highDescription = description;
-                else if (i == 1) _mediumDescription = description;
-                else _lowDescription = description;
-                settingsCard.Controls.Add(description);
-
-                Label levelTitle = new()
-                {
-                    Text = L("BatteryLevel"),
-                    Location = new Point(274, y),
-                    AutoSize = true,
-                    Font = new Font("Segoe UI", 7.8f),
-                    ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                    BackColor = Color.Transparent
-                };
-                settingsCard.Controls.Add(levelTitle);
-
-                CriticalBatteryNumericControl levelInput = new()
-                {
-                    Location = new Point(273, y + 18),
-                    Size = new Size(72, 26),
-                    Minimum = 0,
-                    Maximum = 100,
-                    Value = _colors[i].MinimumPercent,
-                    DarkMode = _dark
-                };
-                levelInput.ValueChanged += (_, _) =>
-                {
-                    _colors[index].MinimumPercent = levelInput.Value;
-                    _preview.RefreshPreview();
-                };
-                settingsCard.Controls.Add(levelInput);
-                _levels.Add(levelInput);
-
-                Label percent = new()
-                {
-                    Text = "%",
-                    Location = new Point(350, y + 23),
-                    AutoSize = true,
-                    Font = new Font("Segoe UI", 8.2f),
-                    ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                    BackColor = Color.Transparent
-                };
-                settingsCard.Controls.Add(percent);
-            }
-
-            Panel colorSectionSeparator = new()
-            {
-                Location = new Point(12, 164),
-                Size = new Size(settingsCard.Width - 24, 1),
+                Dock = DockStyle.Top,
+                Height = 1,
+                Margin = new Padding(0, 6, 0, 8),
                 BackColor = _dark ? Color.FromArgb(68, 73, 79) : Color.FromArgb(220, 225, 232)
             };
-            settingsCard.Controls.Add(colorSectionSeparator);
+            AddAutoSizeRow(layout, separator);
 
-            Label gradientLabel = new()
+            AddAutoSizeRow(layout, BuildGradientRow(useGradient));
+            AddAutoSizeRow(layout, BuildTransitionRow(gradientPercent));
+
+            return settingsCard;
+        }
+
+        private Control BuildColorRow(int index, string titleText)
+        {
+            TableLayoutPanel row = new()
             {
-                Text = L("UseGradient"),
-                Location = new Point(12, 172),
+                Dock = DockStyle.Top,
                 AutoSize = true,
-                Font = new Font("Segoe UI Semibold", 8.9f),
-                ForeColor = _dark ? Color.WhiteSmoke : LightText,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 1,
+                MinimumSize = new Size(0, 52),
+                Margin = new Padding(0, 0, 0, 4),
+                Padding = new Padding(0, 2, 0, 2),
                 BackColor = Color.Transparent
             };
-            settingsCard.Controls.Add(gradientLabel);
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SwatchColumnLogicalWidth));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ThresholdColumnLogicalWidth));
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            Label gradientDescription = new()
+            ColorSwatchControl swatch = new(_colors[index].Color, _dark)
             {
-                Text = L("UseGradientDescription"),
-                Location = new Point(12, 191),
-                Size = new Size(300, 28),
-                Font = new Font("Segoe UI", 7.8f),
-                ForeColor = _dark ? DarkSecondary : LightSecondary,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left,
+                Size = new Size(48, 48),
+                Margin = new Padding(0)
+            };
+            swatch.ColorChanged += (_, _) =>
+            {
+                _colors[index].Color = swatch.Color;
+                _preview.RefreshPreview();
+            };
+            row.Controls.Add(swatch, 0, 0);
+            _swatches.Add(swatch);
+
+            TableLayoutPanel textStack = CreateTextStack(
+                titleText,
+                index == 2 ? L("UsedBelowThisLevel") : L("UsedFromThisLevelAndAbove"),
+                9.1f,
+                7.8f,
+                ColorTextMaximumLogicalWidth);
+            textStack.Margin = new Padding(4, 1, 8, 0);
+            row.Controls.Add(textStack, 1, 0);
+
+            TableLayoutPanel thresholdStack = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
                 BackColor = Color.Transparent
             };
-            settingsCard.Controls.Add(gradientDescription);
+            thresholdStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            thresholdStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            thresholdStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            Label levelTitle = new()
+            {
+                Text = L("BatteryLevel"),
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 7.8f),
+                ForeColor = _dark ? Color.WhiteSmoke : LightText,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 2)
+            };
+            thresholdStack.Controls.Add(levelTitle, 0, 0);
+
+            TableLayoutPanel inputRow = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, NumericLogicalWidth));
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            inputRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            CriticalBatteryNumericControl levelInput = new()
+            {
+                Size = new Size(NumericLogicalWidth, NumericLogicalHeight),
+                Minimum = 0,
+                Maximum = 100,
+                Value = _colors[index].MinimumPercent,
+                DarkMode = _dark,
+                Margin = new Padding(0)
+            };
+            levelInput.ValueChanged += (_, _) =>
+            {
+                _colors[index].MinimumPercent = levelInput.Value;
+                _preview.RefreshPreview();
+            };
+            inputRow.Controls.Add(levelInput, 0, 0);
+            _levels.Add(levelInput);
+
+            Label percent = new()
+            {
+                Text = "%",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Font = new Font("Segoe UI", 8.2f),
+                ForeColor = _dark ? Color.WhiteSmoke : LightText,
+                BackColor = Color.Transparent,
+                Margin = new Padding(6, 0, 0, 0)
+            };
+            inputRow.Controls.Add(percent, 1, 0);
+            thresholdStack.Controls.Add(inputRow, 0, 1);
+
+            row.Controls.Add(thresholdStack, 2, 0);
+            return row;
+        }
+
+        private Control BuildGradientRow(bool useGradient)
+        {
+            TableLayoutPanel row = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0, 0, 0, 8),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ToggleColumnLogicalWidth));
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            TableLayoutPanel textStack = CreateTextStack(
+                L("UseGradient"),
+                L("UseGradientDescription"),
+                8.9f,
+                7.8f,
+                WideTextMaximumLogicalWidth);
+            textStack.Margin = new Padding(0, 0, 10, 0);
+            row.Controls.Add(textStack, 0, 0);
 
             _gradientToggle = new ToggleSwitchControl
             {
-                Location = new Point(357, 169),
-                Size = new Size(54, 28),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Size = new Size(ToggleLogicalWidth, ToggleLogicalHeight),
                 Checked = useGradient,
-                DarkMode = _dark
+                DarkMode = _dark,
+                Margin = new Padding(0, 1, 0, 0)
             };
-            settingsCard.Controls.Add(_gradientToggle);
+            row.Controls.Add(_gradientToggle, 1, 0);
 
-            Label transitionLabel = new()
+            return row;
+        }
+
+        private Control BuildTransitionRow(int gradientPercent)
+        {
+            TableLayoutPanel row = new()
             {
-                Text = L("GradientTransitionStep"),
-                Location = new Point(12, 225),
+                Dock = DockStyle.Top,
                 AutoSize = true,
-                Font = new Font("Segoe UI Semibold", 8.9f),
-                ForeColor = _dark ? Color.WhiteSmoke : LightText,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
                 BackColor = Color.Transparent
             };
-            settingsCard.Controls.Add(transitionLabel);
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ThresholdColumnLogicalWidth));
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            Label transitionDescription = new()
+            TableLayoutPanel textStack = CreateTextStack(
+                L("GradientTransitionStep"),
+                L("GradientTransitionStepDescription"),
+                8.9f,
+                7.7f,
+                WideTextMaximumLogicalWidth);
+            textStack.Margin = new Padding(0, 0, 10, 0);
+            row.Controls.Add(textStack, 0, 0);
+
+            TableLayoutPanel inputRow = new()
             {
-                Text = L("GradientTransitionStepDescription"),
-                Location = new Point(12, 244),
-                Size = new Size(285, 22),
-                Font = new Font("Segoe UI", 7.7f),
-                ForeColor = _dark ? DarkSecondary : LightSecondary,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0, 0, 0, 0),
+                Padding = new Padding(0),
                 BackColor = Color.Transparent
             };
-            settingsCard.Controls.Add(transitionDescription);
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, NumericLogicalWidth));
+            inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            inputRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             _gradientStepInput = new CriticalBatteryNumericControl
             {
-                Location = new Point(309, 223),
-                Size = new Size(72, 26),
+                Size = new Size(NumericLogicalWidth, NumericLogicalHeight),
                 Minimum = 0,
                 Maximum = 50,
                 Value = Math.Clamp(gradientPercent, 0, 50),
-                DarkMode = _dark
+                DarkMode = _dark,
+                Margin = new Padding(0)
             };
-            settingsCard.Controls.Add(_gradientStepInput);
+            inputRow.Controls.Add(_gradientStepInput, 0, 0);
 
             Label stepPercent = new()
             {
                 Text = "%",
-                Location = new Point(386, 229),
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Font = new Font("Segoe UI", 8.2f),
                 ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(6, 0, 0, 0)
             };
-            settingsCard.Controls.Add(stepPercent);
+            inputRow.Controls.Add(stepPercent, 1, 0);
+            row.Controls.Add(inputRow, 1, 0);
 
+            return row;
+        }
+
+        private RoundedPanel BuildPreviewCard()
+        {
             RoundedPanel previewCard = new()
             {
-                Location = new Point(18, 381),
-                Size = new Size(424, 76),
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0),
                 BorderColor = _dark ? DarkBorder : LightBorder,
-                OutsideBackColor = _dark ? Color.FromArgb(34, 37, 40) : Color.White,
+                OutsideBackColor = _dark ? DarkBackground : LightBackground,
                 BackColor = _dark ? Color.FromArgb(42, 45, 48) : Color.FromArgb(248, 249, 251)
             };
-            Controls.Add(previewCard);
+
+            TableLayoutPanel layout = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0),
+                Padding = new Padding(CardInnerPaddingLogical, 8, CardInnerPaddingLogical, 8),
+                BackColor = Color.Transparent
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PreviewLogicalHeight));
+            previewCard.Controls.Add(layout);
 
             Label previewTitle = new()
             {
                 Text = L("Preview"),
-                Location = new Point(12, 8),
                 AutoSize = true,
+                Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI Semibold", 8.9f),
                 ForeColor = _dark ? Color.WhiteSmoke : LightText,
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(0, 0, 0, 3)
             };
-            previewCard.Controls.Add(previewTitle);
+            layout.Controls.Add(previewTitle, 0, 0);
 
             _preview = new DynamicColorPreviewControl(_dark, _language, _colors, _gradientToggle, _gradientStepInput)
             {
-                Location = new Point(8, 28),
-                Size = new Size(408, 43)
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0)
             };
-            previewCard.Controls.Add(_preview);
+            layout.Controls.Add(_preview, 0, 1);
 
             _gradientToggle.CheckedChanged += (_, _) => _preview.RefreshPreview();
             _gradientStepInput.ValueChanged += (_, _) => _preview.RefreshPreview();
+
+            return previewCard;
         }
 
-        private void BuildFooter()
+        private Control BuildFooter()
         {
-            ActionButton reset = new(_iconCache)
+            TableLayoutPanel footer = new()
             {
-                Text = L("ResetToDefaults"),
-                Location = new Point(16, 475),
-                Size = new Size(178, 36),
-                Font = new Font("Segoe UI", 8.7f),
-                Primary = false,
-                ShowResetIcon = true,
-                DarkMode = _dark,
-                OutsideBackColor = _dark ? DarkBackground : LightBackground
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(16, 10, 16, 10),
+                BackColor = _dark ? DarkBackground : LightBackground
             };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            ActionButton reset = CreateFooterButton(L("ResetToDefaults"), primary: false, showResetIcon: true);
+            reset.Anchor = AnchorStyles.Left;
             reset.Click += (_, _) =>
             {
                 AppSettings defaults = AppSettings.CreateDefault();
@@ -438,18 +691,22 @@ public sealed partial class SettingsForm : Form
                 _gradientStepInput.Value = defaults.GradientPercent;
                 _preview.RefreshPreview();
             };
-            Controls.Add(reset);
+            footer.Controls.Add(reset, 0, 0);
 
-            ActionButton ok = new(_iconCache)
+            FlowLayoutPanel actions = new()
             {
-                Text = L("Ok"),
-                Location = new Point(244, 475),
-                Size = new Size(92, 36),
-                Font = new Font("Segoe UI", 8.7f),
-                Primary = true,
-                DarkMode = _dark,
-                OutsideBackColor = _dark ? DarkBackground : LightBackground
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Anchor = AnchorStyles.Right,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
             };
+
+            ActionButton ok = CreateFooterButton(L("Ok"), primary: true);
+            ok.Margin = new Padding(0, 0, FooterButtonGapLogical, 0);
             ok.Click += (_, _) =>
             {
                 if (_colors[0].MinimumPercent <= _colors[1].MinimumPercent ||
@@ -467,30 +724,151 @@ public sealed partial class SettingsForm : Form
                 DialogResult = DialogResult.OK;
                 Close();
             };
-            Controls.Add(ok);
+            actions.Controls.Add(ok);
 
-            ActionButton cancel = new(_iconCache)
-            {
-                Text = L("Cancel"),
-                Location = new Point(346, 475),
-                Size = new Size(98, 36),
-                Font = new Font("Segoe UI", 8.7f),
-                Primary = false,
-                DarkMode = _dark,
-                OutsideBackColor = _dark ? DarkBackground : LightBackground
-            };
+            ActionButton cancel = CreateFooterButton(L("Cancel"), primary: false);
             cancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(cancel);
+            actions.Controls.Add(cancel);
+
+            footer.Controls.Add(actions, 1, 0);
+            return footer;
         }
 
-        private void UpdateDescriptions()
+        private ActionButton CreateFooterButton(string text, bool primary, bool showResetIcon = false)
         {
-            if (_levels.Count < 3)
+            return new ActionButton(_iconCache)
+            {
+                Text = text,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(showResetIcon ? 124 : 92, FooterButtonLogicalHeight),
+                Padding = showResetIcon
+                    ? new Padding(32, 0, 14, 0)
+                    : new Padding(18, 0, 18, 0),
+                Font = new Font("Segoe UI", 8.7f),
+                Primary = primary,
+                ShowResetIcon = showResetIcon,
+                DarkMode = _dark,
+                OutsideBackColor = _dark ? DarkBackground : LightBackground,
+                Margin = new Padding(0)
+            };
+        }
+
+        private TableLayoutPanel CreateTextStack(
+            string title,
+            string description,
+            float titleFontSize,
+            float descriptionFontSize,
+            int maximumLogicalWidth)
+        {
+            TableLayoutPanel stack = new()
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            Label titleLabel = CreateWrappedLabel(
+                title,
+                new Font("Segoe UI Semibold", titleFontSize),
+                _dark ? Color.WhiteSmoke : LightText,
+                new Padding(0, 0, 0, 2),
+                maximumLogicalWidth);
+            Label descriptionLabel = CreateWrappedLabel(
+                description,
+                new Font("Segoe UI", descriptionFontSize),
+                _dark ? DarkSecondary : LightSecondary,
+                new Padding(0),
+                maximumLogicalWidth);
+
+            stack.Controls.Add(titleLabel, 0, 0);
+            stack.Controls.Add(descriptionLabel, 0, 1);
+            return stack;
+        }
+
+        private static Label CreateWrappedLabel(
+            string text,
+            Font font,
+            Color color,
+            Padding margin,
+            int maximumLogicalWidth)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                AutoEllipsis = false,
+                MaximumSize = new Size(maximumLogicalWidth, 0),
+                Font = font,
+                ForeColor = color,
+                BackColor = Color.Transparent,
+                Margin = margin,
+                TextAlign = ContentAlignment.TopLeft
+            };
+        }
+
+        private void AddContentControl(Control control)
+        {
+            int row = _contentLayout.RowCount++;
+            _contentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _contentLayout.Controls.Add(control, 0, row);
+        }
+
+        private static void AddAutoSizeRow(TableLayoutPanel layout, Control control)
+        {
+            int row = layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(control, 0, row);
+        }
+
+        private int ScaleDialogLogical(int logicalValue) =>
+            PngIconCache.ScaleLogicalToInt(logicalValue, DeviceDpi);
+
+        private void FitToWorkingArea()
+        {
+            if (IsDisposed || !IsHandleCreated)
                 return;
 
-            _highDescription.Text = L("UsedFromThisLevelAndAbove");
-            _mediumDescription.Text = L("UsedFromThisLevelAndAbove");
-            _lowDescription.Text = L("UsedBelowThisLevel");
+            Screen screen = Screen.FromHandle(Handle);
+            Rectangle workingArea = screen.WorkingArea;
+            int margin = ScaleDialogLogical(WorkingAreaMarginLogical);
+            int availableWidth = Math.Max(1, workingArea.Width - margin * 2);
+            int minimumWidth = Math.Min(ScaleDialogLogical(360), availableWidth);
+            int targetWidth = Math.Clamp(ClientSize.Width, minimumWidth, availableWidth);
+
+            if (ClientSize.Width != targetWidth)
+                ClientSize = new Size(targetWidth, ClientSize.Height);
+
+            PerformLayout();
+            _contentHost.PerformLayout();
+            _contentLayout.PerformLayout();
+
+            int contentHeight = _contentLayout.GetPreferredSize(
+                new Size(Math.Max(1, _contentHost.ClientSize.Width), 0)).Height;
+            int chromeHeight = ScaleDialogLogical(
+                HeaderLogicalHeight + FooterLogicalHeight + SeparatorLogicalHeight * 2);
+            int desiredClientHeight = chromeHeight + contentHeight;
+            int availableHeight = Math.Max(1, workingArea.Height - margin * 2);
+            int minimumHeight = Math.Min(ScaleDialogLogical(DialogMinimumLogicalHeight), availableHeight);
+            int targetHeight = Math.Clamp(desiredClientHeight, minimumHeight, availableHeight);
+
+            _contentHost.AutoScroll = desiredClientHeight > availableHeight;
+            ClientSize = new Size(targetWidth, targetHeight);
+            _contentScrollBar.RefreshState();
+            CenterToParent();
+
+            int clampedX = Math.Clamp(Left, workingArea.Left, Math.Max(workingArea.Left, workingArea.Right - Width));
+            int clampedY = Math.Clamp(Top, workingArea.Top, Math.Max(workingArea.Top, workingArea.Bottom - Height));
+            Location = new Point(clampedX, clampedY);
         }
     }
 }

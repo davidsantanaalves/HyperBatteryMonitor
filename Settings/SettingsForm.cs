@@ -8,12 +8,18 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using HyperXBatteryTray.Devices;
 using HyperXBatteryTray.Monitoring;
+using HyperXBatteryTray.Updates;
 
 namespace HyperXBatteryTray.Settings;
 
 public sealed partial class SettingsForm : Form
 {
     private readonly AppSettings _settings;
+    private readonly UpdateCoordinator? _updateCoordinator;
+    private readonly Func<Task<bool>>? _installDownloadedUpdateAsync;
+    private UpdateChannel _pendingUpdateChannel;
+    private bool _pendingUpdateChannelUserSelected;
+    private UpdateDownloadMode _pendingUpdateDownloadMode;
     private readonly StartupManager _startupManager;
     private readonly PngIconCache _iconCache;
     private DeviceSelector _deviceSelector = null!;
@@ -35,6 +41,8 @@ public sealed partial class SettingsForm : Form
     private BatteryIconControl _batteryIcon = null!;
     private readonly Panel _pageHost;
     private TableLayoutPanel? _activePageLayout;
+    private ThemedVerticalScrollBar? _pageHostScrollBar;
+    private ThemedVerticalScrollBar? _activePageScrollBar;
     private readonly Panel _sidebar;
     private Panel _footer = null!;
     private Button _resetButton = null!;
@@ -137,7 +145,7 @@ public sealed partial class SettingsForm : Form
         base.OnHandleCreated(e);
         ApplyTitleBarTheme(EffectiveTheme == AppTheme.Dark);
         ApplyCurrentScrollThemes(EffectiveTheme == AppTheme.Dark);
-        PositionFooterButtons();
+        PositionFooter();
         _iconCache.ClearBitmaps();
         WarmUpIcons();
     }
@@ -183,6 +191,10 @@ public sealed partial class SettingsForm : Form
         ApplyNativeScrollTheme(_pageHost, dark);
         if (_activePageLayout != null)
             ApplyNativeScrollTheme(_activePageLayout, dark);
+        _pageHostScrollBar?.SetTheme(dark);
+        _activePageScrollBar?.SetTheme(dark);
+        _pageHostScrollBar?.RefreshState();
+        _activePageScrollBar?.RefreshState();
     }
 
     private static void ApplyNativeScrollTheme(ScrollableControl control, bool dark)
@@ -221,8 +233,26 @@ public sealed partial class SettingsForm : Form
         IHyperXDevice? device = null,
         bool isCharging = false,
         TimeSpan? batteryRemainingTime = null)
+        : this(settings, device, isCharging, batteryRemainingTime, null, null)
+    {
+    }
+
+    internal SettingsForm(
+        AppSettings settings,
+        IHyperXDevice? device,
+        bool isCharging,
+        TimeSpan? batteryRemainingTime,
+        UpdateCoordinator? updateCoordinator,
+        Func<Task<bool>>? installDownloadedUpdateAsync)
     {
         _settings = settings;
+        _updateCoordinator = updateCoordinator;
+        _installDownloadedUpdateAsync = installDownloadedUpdateAsync;
+        _pendingUpdateChannel = settings.UpdateChannel;
+        _pendingUpdateChannelUserSelected = settings.UpdateChannelUserSelected;
+        _pendingUpdateDownloadMode = settings.UpdateDownloadMode;
+        if (_updateCoordinator is not null)
+            _updateCoordinator.Changed += OnUpdateStatusChanged;
         _runtimeDevice = device;
         _device = device;
         _runtimeIsCharging = isCharging;
@@ -233,10 +263,11 @@ public sealed partial class SettingsForm : Form
         _iconCache = new PngIconCache();
         _selectedLanguage = settings.Language;
         _selectedTheme = settings.Theme;
-        _pendingSelectedDevice = settings.SelectedDevice;
-        _pendingStartupEnabled = settings.IsNewSettingsProfile
-            ? AppSettings.DefaultStartWithWindows
-            : _startupManager.IsEnabled();
+        _pendingSelectedDevice = HyperXDeviceManager.GetSelectionModelName(settings.SelectedDevice);
+        _pendingStartupEnabled = ApplicationRuntime.IsTestMode ? false :
+            settings.IsNewSettingsProfile
+                ? AppSettings.DefaultStartWithWindows
+                : _startupManager.IsEnabled();
         _pendingNotifyOnLowBattery = settings.NotifyOnLowBattery;
         _pendingNotifyWhenFullyCharged = settings.NotifyWhenFullyCharged;
         _pendingBlinkOnCriticalBattery = settings.BlinkOnCriticalBattery;
@@ -255,7 +286,8 @@ public sealed partial class SettingsForm : Form
         MinimizeBox = true;
         ShowInTaskbar = true;
         ClientSize = new Size(760, 520);
-        TopMost = true;
+        // Standard Windows z-order: owned dialogs remain above this window
+        // without preventing other applications from taking the foreground.
         DoubleBuffered = true;
         BackColor = LightBackground;
         Font = new Font("Segoe UI", 9.5f);
@@ -280,6 +312,7 @@ public sealed partial class SettingsForm : Form
 
         Controls.Add(_pageHost);
         Controls.Add(_sidebar);
+        _pageHostScrollBar = new ThemedVerticalScrollBar(_pageHost, EffectiveTheme == AppTheme.Dark);
 
         _sidebarDeviceCard = new RoundedPanel
         {
@@ -443,7 +476,7 @@ public sealed partial class SettingsForm : Form
         BuildSidebar();
         ShowPage("Device");
 
-        _resetButton = CreateFooterButton(L("RestoreDefaults"), false);
+        _resetButton = CreateFooterButton(L("ResetToDefaults"), false, showResetIcon: true);
         _okButton = CreateFooterButton(L("Ok"), true);
         _cancelButton = CreateFooterButton(L("Cancel"), false);
         _applyButton = CreateFooterButton(L("Apply"), false);

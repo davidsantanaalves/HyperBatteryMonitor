@@ -7,6 +7,7 @@ using HyperXBatteryTray.Devices;
 using HyperXBatteryTray.Monitoring;
 using HyperXBatteryTray.Notifications;
 using HyperXBatteryTray.Settings;
+using HyperXBatteryTray.Updates;
 
 namespace HyperXBatteryTray;
 
@@ -23,6 +24,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private readonly SettingsManager _settingsManager;
     private readonly AppSettings _settings;
     private readonly NotificationService _notificationService;
+    private readonly UpdateCoordinator _updateCoordinator;
+    private readonly Control _toastActivationDispatcher = new();
     private readonly BatteryRemainingTimeEstimator _batteryRemainingTimeEstimator;
 
     private Icon? _currentApplicationIcon;
@@ -41,6 +44,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _settingsManager = new SettingsManager();
         _settings = _settingsManager.Load();
         _notificationService = new NotificationService();
+        _updateCoordinator = new UpdateCoordinator(_settings);
         _batteryRemainingTimeEstimator = new BatteryRemainingTimeEstimator(
             _settingsManager.LoadBatteryHistory());
 
@@ -67,6 +71,11 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _notifyIcon.MouseUp += NotifyIcon_MouseUp;
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
 
+        // Toast activation arrives on a background thread, including on cold launch.
+        // The hidden WinForms control marshals all Settings navigation to the UI thread.
+        _ = _toastActivationDispatcher.Handle;
+        UpdateNotificationService.OpenAboutRequested += OnUpdateToastActivated;
+
         ApplyLocalization();
         ApplyTheme();
         UpdateTrayIcon();
@@ -79,6 +88,10 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
         if (_batteryMonitor != null)
             _batteryMonitor.Start();
+
+        _updateCoordinator.Start();
+        if (UpdateNotificationService.ConsumePendingOpenAbout())
+            OnUpdateToastActivated();
     }
 
     private void InitializeSelectedDevice()
@@ -280,12 +293,37 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             _settings,
             _device,
             _isCharging,
-            GetCurrentBatteryRemainingTime());
+            GetCurrentBatteryRemainingTime(),
+            _updateCoordinator,
+            InstallDownloadedUpdateAsync);
         _settingsForm.SettingsApplied += SettingsForm_SettingsApplied;
         _settingsForm.FormClosed += SettingsForm_FormClosed;
         _settingsForm.Show();
         _settingsForm.BringToFront();
         _settingsForm.Activate();
+    }
+
+    private void OnUpdateToastActivated()
+    {
+        if (_toastActivationDispatcher.IsDisposed || !_toastActivationDispatcher.IsHandleCreated)
+            return;
+
+        try
+        {
+            _toastActivationDispatcher.BeginInvoke((MethodInvoker)(() =>
+            {
+                if (_toastActivationDispatcher.IsDisposed)
+                    return;
+
+                UpdateNotificationService.ConsumePendingOpenAbout();
+                ShowSettings(null, EventArgs.Empty);
+                _settingsForm?.NavigateToAbout();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore activations racing with normal application shutdown.
+        }
     }
 
     private void SettingsForm_FormClosed(object? sender, FormClosedEventArgs e)
@@ -300,6 +338,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         try
         {
             _settingsManager.Save(_settings);
+            _updateCoordinator.PreferencesChanged();
             _notificationService.ResetState();
             InitializeSelectedDevice();
             _settingsForm?.SetDevice(_device);
@@ -319,7 +358,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             MessageBox.Show(
                 _settingsForm,
                 string.Format(L("SaveError"), ex.Message),
-                "HyperX Battery Monitor",
+                Application.ProductName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -430,7 +469,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         bool selected = !string.IsNullOrWhiteSpace(_settings.SelectedDevice);
         string deviceName = selected
             ? Localization.DeviceDisplayName(
-                NormalizeDeviceName(_settings.SelectedDevice),
+                HyperXDeviceManager.GetSelectionModelName(_settings.SelectedDevice),
                 _settings.Language)
             : L("UnknownHeadphones");
         string battery;
@@ -468,7 +507,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
                 ? (_device!.IsMicrophoneMuted ? L("MicrophoneMuted") : L("MicrophoneOpen"))
                 : L("MicrophoneNA"));
 
-        string tooltip = $"{deviceName}\n{status}\n{battery}\n{microphone}";
+        string tooltip = $"{ApplicationRuntime.TestIndicator}{deviceName}\n{status}\n{battery}\n{microphone}";
         _notifyIcon.Text = tooltip.Length <= NotifyIconMaximumTextLength
             ? tooltip
             : tooltip[..NotifyIconMaximumTextLength];
@@ -479,10 +518,13 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         int battery = _device?.Battery ?? -1;
         bool connected = _device?.IsConnected == true;
 
+        // Bluetooth runtime percentages must not contaminate the historical HID
+        // discharge model: nominal battery life differs between transports.
+        bool isBluetooth = _device is BluetoothFallbackDevice fallback && fallback.IsUsingBluetooth;
         bool historyChanged = _batteryRemainingTimeEstimator.Observe(
             _settings.SelectedDevice,
             battery,
-            connected,
+            connected && !isBluetooth,
             _isCharging);
 
         if (historyChanged)
@@ -504,11 +546,13 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     }
 
     private TimeSpan? GetCurrentBatteryRemainingTime() =>
-        _batteryRemainingTimeEstimator.EstimateRemaining(
-            _settings.SelectedDevice,
-            _device?.Battery ?? -1,
-            _device?.IsConnected == true,
-            _isCharging);
+        _device is BluetoothFallbackDevice fallback && fallback.IsUsingBluetooth
+            ? null
+            : _batteryRemainingTimeEstimator.EstimateRemaining(
+                _settings.SelectedDevice,
+                _device?.Battery ?? -1,
+                _device?.IsConnected == true,
+                _isCharging);
 
     private static string NormalizeDeviceName(string value) =>
         HyperXDeviceManager.NormalizeSupportedDeviceName(value);
@@ -701,10 +745,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
     private Icon LoadIconFile(string fileName)
     {
-        string path = Path.Combine(
-            AppContext.BaseDirectory,
-            "Icons",
-            GetEffectiveTheme() == AppTheme.Dark ? "Dark" : "Light",
+        string path = AssetPaths.GetThemeIconPath(
+            GetEffectiveTheme() == AppTheme.Dark,
             fileName);
 
         try
@@ -1419,10 +1461,29 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             (int)Math.Round(first.G + (second.G - first.G) * t),
             (int)Math.Round(first.B + (second.B - first.B) * t));
     }
+    private async Task<bool> InstallDownloadedUpdateAsync()
+    {
+        if (!ApplicationRuntime.CanInstallUpdates)
+            return false;
+
+        VerifiedInstaller? installer = await _updateCoordinator.PrepareInstallationAsync();
+        if (installer is null || !await UpdateInstallerLauncher.TryStartAsync(installer))
+            return false;
+
+        // The launcher verifies the installer again after this process has exited.
+        // ExitThreadCore disposes the updater, forms, tray icons, timers and HID.
+        _updateCoordinator.ClearInstallationFailure();
+        ExitThread();
+        return true;
+    }
+
     private void ExitApplication(object? sender, EventArgs e) => ExitThread();
 
     protected override void ExitThreadCore()
     {
+        UpdateNotificationService.OpenAboutRequested -= OnUpdateToastActivated;
+        _toastActivationDispatcher.Dispose();
+        _updateCoordinator.Dispose();
         _settingsForm?.Close();
         _blinkTimer?.Stop();
         _blinkTimer?.Dispose();

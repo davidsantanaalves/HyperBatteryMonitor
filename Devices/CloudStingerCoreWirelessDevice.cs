@@ -7,6 +7,13 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private const ushort DeviceVendorId = 0x0951;
     private const ushort DeviceProductId = 0x170B;
     private const string ControlInterface = "VID_0951&PID_170B&MI_03&Col03";
+    // Verified by PR #6 contributor on the original 4P5J1AA PlayStation dongle.
+    private const ushort PlayStationVendorId = 0x03F0;
+    private const ushort PlayStationProductId = 0x0A93;
+    private const string PlayStationControlInterface = "VID_03F0&PID_0A93&MI_03&Col03";
+    private const byte PlayStationResponseType = 0x12;
+    private const byte PlayStationResponseCommand = 0x05;
+    private const int PlayStationBatteryResponseAttempts = 10;
     private const byte FeatureReportId = 0xFF;
     private const byte ConnectedValue = 1;
     private const byte NoChargingValue = 3;
@@ -49,6 +56,24 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
         NominalBatteryLifeHours = 17
     };
 
+    // Distinct receiver definition: never impose the PlayStation header/retry
+    // requirements on the original Kingston 0951:170B feature-report driver.
+    internal static readonly HyperXDeviceDefinition PlayStationDefinition = new()
+    {
+        Name = "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)",
+        VendorId = PlayStationVendorId,
+        ProductId = PlayStationProductId,
+        InterfacePattern = PlayStationControlInterface,
+        ControlUsagePage = 0xFF00,
+        ControlUsage = 0x0001,
+        BatteryCommandBytes = BatteryCommand,
+        BatteryByteIndex = VoltageIndex,
+        SupportsMicrophoneMuteMonitoring = false,
+        SupportsChargingMonitoring = true,
+        NominalBatteryLifeHours = 17
+    };
+
+    private readonly bool _isPlayStationReceiver;
     private readonly object _featureLock = new();
     private bool _requestPending;
     private int _session;
@@ -56,8 +81,16 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private byte _lastChargeCode = NoChargingValue;
     private int _chargeRepeatCount;
 
-    public CloudStingerCoreWirelessDevice() : base(DeviceDefinition)
+    public CloudStingerCoreWirelessDevice() : this(DeviceDefinition)
     {
+    }
+
+    internal CloudStingerCoreWirelessDevice(HyperXDeviceDefinition definition) : base(definition)
+    {
+        // Only this documented receiver revision uses FF 12 05 battery
+        // confirmation and multi-read handling of the stale FF 01 00 report.
+        _isPlayStationReceiver = definition.VendorId == PlayStationVendorId &&
+            definition.ProductId == PlayStationProductId;
     }
 
     public override async Task<int?> QueryBatteryAsync(CancellationToken cancellationToken = default)
@@ -79,7 +112,9 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                 connection[ConnectionValueIndex] != ConnectedValue)
                 return null;
 
-            byte[]? report = await ExchangeFeatureAsync(BatteryCommand, session, cancellationToken)
+            byte[]? report = await ExchangeFeatureAsync(
+                    BatteryCommand, session, cancellationToken,
+                    _isPlayStationReceiver ? IsPlayStationBatteryResponse : null)
                 .ConfigureAwait(false);
             if (report == null || report.Length < VoltageIndex + VoltageByteCount)
                 return null;
@@ -111,7 +146,9 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
             return Task.FromResult<bool?>(IsConnected && _chargeCode.HasValue ? IsCharging : null);
     }
 
-    private async Task<byte[]?> ExchangeFeatureAsync(byte[] command, int session, CancellationToken cancellationToken)
+    private async Task<byte[]?> ExchangeFeatureAsync(
+        byte[] command, int session, CancellationToken cancellationToken,
+        Func<byte[], bool>? isExpectedResponse = null)
     {
         lock (_featureLock)
         {
@@ -120,13 +157,34 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                 return null;
             Connection.SetFeatureReport(command);
         }
-        await Task.Delay(FeatureResponseDelayMilliseconds, cancellationToken).ConfigureAwait(false);
-        lock (_featureLock)
+
+        // The original receiver performs exactly one read as before.
+        // On the PlayStation receiver, the first read may be a stale FF 01 00
+        // report; the contributor observed FF 12 05 on the second attempt
+        // in all 52 queries. Bound retries to 10 reads / 200 ms maximum.
+        int attempts = isExpectedResponse == null ? 1 : PlayStationBatteryResponseAttempts;
+        for (int attempt = 0; attempt < attempts; attempt++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return session == _session && IsConnected ? Connection.GetFeatureReport(FeatureReportId) : null;
+            await Task.Delay(FeatureResponseDelayMilliseconds, cancellationToken)
+                .ConfigureAwait(false);
+            byte[]? response;
+            lock (_featureLock)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                response = session == _session && IsConnected
+                    ? Connection.GetFeatureReport(FeatureReportId) : null;
+            }
+            if (response == null || isExpectedResponse == null || isExpectedResponse(response))
+                return response;
         }
+        return null;
     }
+
+    private static bool IsPlayStationBatteryResponse(byte[] response) =>
+        response.Length >= VoltageIndex + VoltageByteCount &&
+        response[0] == FeatureReportId &&
+        response[1] == PlayStationResponseType &&
+        response[2] == PlayStationResponseCommand;
 
     private void ApplySample(int battery, byte charge)
     {

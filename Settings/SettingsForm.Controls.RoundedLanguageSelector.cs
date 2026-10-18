@@ -16,6 +16,7 @@ public sealed partial class SettingsForm : Form
     {
         private bool _darkMode;
         private LanguagePopupControl? _popup;
+        private ThemedVerticalScrollBar? _popupScrollBar;
         private LanguagePopupMessageFilter? _popupMessageFilter;
         private int _selectedIndex = -1;
 
@@ -28,6 +29,7 @@ public sealed partial class SettingsForm : Form
                 if (_darkMode == value) return;
                 _darkMode = value;
                 _popup?.ApplyTheme(_darkMode);
+                _popupScrollBar?.SetTheme(_darkMode);
                 Invalidate();
             }
         }
@@ -167,24 +169,45 @@ public sealed partial class SettingsForm : Form
             Form? form = FindForm();
             if (form == null || Items.Count == 0) return;
 
+            int desiredHeight =
+                Items.Count * ScaleLogical(LanguagePopupItemLogicalHeight) +
+                ScaleLogical(LanguagePopupBorderLogicalWidth * 2);
+            Point belowLocation = form.PointToClient(PointToScreen(new Point(0, Height)));
+            Point selectorLocation = form.PointToClient(PointToScreen(Point.Empty));
+            int spaceBelow = Math.Max(0, form.ClientSize.Height - belowLocation.Y);
+            int spaceAbove = Math.Max(0, selectorLocation.Y);
+            bool openBelow = spaceBelow >= spaceAbove;
+            int availableHeight = openBelow ? spaceBelow : spaceAbove;
+            int minimumPopupHeight = Math.Min(
+                desiredHeight,
+                ScaleLogical(LanguagePopupItemLogicalHeight * LanguagePopupMinimumVisibleItems));
+            int popupHeight = Math.Min(
+                desiredHeight,
+                Math.Max(
+                    minimumPopupHeight,
+                    availableHeight - ScaleLogical(LanguagePopupEdgeMarginLogical)));
+
             _popup = new LanguagePopupControl
             {
                 Items = Items.ToArray(),
                 SelectedIndex = _selectedIndex,
                 Font = Font,
                 DarkMode = _darkMode,
-                Size = new Size(Width, Items.Count * ScaleLogical(30))
+                Size = new Size(Width, popupHeight)
             };
             _popup.ItemClicked += Popup_ItemClicked;
             _popup.Dismissed += Popup_Dismissed;
             _popupMessageFilter = new LanguagePopupMessageFilter(this);
             Application.AddMessageFilter(_popupMessageFilter);
 
-            Point screenLocation = PointToScreen(new Point(0, Height));
-            Point formLocation = form.PointToClient(screenLocation);
-            _popup.Location = formLocation;
+            _popup.Location = openBelow
+                ? belowLocation
+                : new Point(selectorLocation.X, selectorLocation.Y - popupHeight);
             form.Controls.Add(_popup);
             _popup.BringToFront();
+            _popupScrollBar = new ThemedVerticalScrollBar(_popup, _darkMode);
+            _popup.ScrollSelectedIntoView();
+            _popupScrollBar.RefreshState();
             _popup.Focus();
         }
 
@@ -212,6 +235,8 @@ public sealed partial class SettingsForm : Form
             }
             popup.ItemClicked -= Popup_ItemClicked;
             popup.Dismissed -= Popup_Dismissed;
+            _popupScrollBar?.Dispose();
+            _popupScrollBar = null;
             if (popup.Parent != null)
                 popup.Parent.Controls.Remove(popup);
             popup.Dispose();

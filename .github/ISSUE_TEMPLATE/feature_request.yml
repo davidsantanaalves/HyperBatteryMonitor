@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an improvement or new feature for HyperX Battery Tray
+description: Suggest an improvement or new feature for Hyper Battery Monitor
 title: "[Feature]: "
 labels:
   - enhancement
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping improve HyperX Battery Tray.
+        Thank you for helping improve Hyper Battery Monitor.
 
         Please describe the feature or improvement you would like to see.
 

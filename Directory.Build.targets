@@ -1,7 +1,0 @@
-<Project>
-  <ItemGroup>
-    <None Update="Icons\Vector\*.svg">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-</Project>

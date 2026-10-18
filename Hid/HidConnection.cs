@@ -19,6 +19,10 @@ public sealed class HidConnection : IDisposable
     private const uint OPEN_EXISTING = 3;
 
     private const int ERROR_NO_MORE_ITEMS = 259;
+    // SP_DEVICE_INTERFACE_DETAIL_DATA_W starts with DWORD cbSize;
+    // the UTF-16 DevicePath begins immediately after this field (offset 4),
+    // regardless of the native structure's padded cbSize on x64.
+    private const int DEVICE_INTERFACE_PATH_OFFSET = sizeof(int);
 
     private static readonly Guid HidClassGuid =
         new("4D1E55B2-F16F-11CF-88CB-001111000030");
@@ -249,6 +253,73 @@ public sealed class HidConnection : IDisposable
         }
     }
 
+    internal sealed record EndpointCandidate(
+        string Path,
+        string Collection,
+        ushort UsagePage,
+        ushort Usage,
+        ushort InputLength,
+        ushort OutputLength);
+
+    /// <summary>
+    /// Enumerates only the documented control collection for a family. Legacy
+    /// definitions without an explicit usage are kept on their original first
+    /// matching HID path, rather than probing unknown firmware/audio interfaces.
+    /// Enumeration uses metadata-only handles and sends no device reports.
+    /// </summary>
+    internal static IReadOnlyList<EndpointCandidate> EnumerateControlEndpoints(
+        HyperXDeviceDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        // A physically documented exact MI/Col already pins a control endpoint.
+        // Preserve its established connection path if descriptor-only access is
+        // restricted by an existing driver or another application.
+        bool exactCollection = definition.InterfacePattern.Contains("&Col",
+            StringComparison.OrdinalIgnoreCase) &&
+            definition.AlternateInterfacePatterns.Count == 0;
+        if (exactCollection || definition.ControlUsagePage is null ||
+            definition.ControlUsage is null)
+        {
+            string? originalPath = FindDevice(definition);
+            return originalPath == null
+                ? Array.Empty<EndpointCandidate>()
+                : new[] { new EndpointCandidate(originalPath,
+                    ExtractCollection(originalPath), 0, 0, 0, 0) };
+        }
+
+        List<EndpointCandidate> candidates = new();
+        foreach (string path in EnumerateDevicePaths(definition.Matches))
+        {
+            // Open access 0: descriptor-only inspection, no HID writes/reads.
+            using SafeFileHandle metadata = CreateFile(path, 0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero,
+                OPEN_EXISTING, 0, IntPtr.Zero);
+            if (metadata.IsInvalid)
+                continue;
+
+            HidCapabilities? caps = GetHidCapabilities(metadata);
+            if (caps is null ||
+                caps.Value.UsagePage != definition.ControlUsagePage.Value ||
+                caps.Value.Usage != definition.ControlUsage.Value ||
+                caps.Value.InputReportByteLength == 0 ||
+                caps.Value.OutputReportByteLength == 0)
+                continue;
+
+            candidates.Add(new EndpointCandidate(path, ExtractCollection(path),
+                caps.Value.UsagePage, caps.Value.Usage,
+                caps.Value.InputReportByteLength, caps.Value.OutputReportByteLength));
+        }
+        return candidates;
+    }
+
+    private static string ExtractCollection(string path)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(path,
+            @"MI_[0-9A-F]{2}&COL[0-9A-F]{2}",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? match.Value.ToUpperInvariant() : string.Empty;
+    }
+
     public static string? FindDevice(HyperXDeviceDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -266,67 +337,44 @@ public sealed class HidConnection : IDisposable
                 StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string? FindDevicePath(Func<string, bool> matches)
+    private static string? FindDevicePath(Func<string, bool> matches) =>
+        EnumerateDevicePaths(matches).FirstOrDefault();
+
+    private static IReadOnlyList<string> EnumerateDevicePaths(Func<string, bool> matches)
     {
+        List<string> paths = new();
         Guid hidGuid = HidClassGuid;
-
-        IntPtr deviceInfoSet =
-            SetupDiGetClassDevs(
-                ref hidGuid,
-                IntPtr.Zero,
-                IntPtr.Zero,
-                DIGCF_PRESENT |
-                DIGCF_DEVICEINTERFACE);
-
-        if (deviceInfoSet == INVALID_HANDLE_VALUE)
-            return null;
+        IntPtr set = SetupDiGetClassDevs(ref hidGuid, IntPtr.Zero,
+            IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+        if (set == INVALID_HANDLE_VALUE)
+            return paths;
 
         try
         {
-            uint index = 0;
-
-            while (true)
+            for (uint index = 0; ; index++)
             {
-                SP_DEVICE_INTERFACE_DATA interfaceData =
-                    new()
-                    {
-                        cbSize = Marshal.SizeOf<SP_DEVICE_INTERFACE_DATA>()
-                    };
-
-                bool result =
-                    SetupDiEnumDeviceInterfaces(
-                        deviceInfoSet,
-                        IntPtr.Zero,
-                        ref hidGuid,
-                        index,
-                        ref interfaceData);
-
-                if (!result)
+                SP_DEVICE_INTERFACE_DATA interfaceData = new()
                 {
-                    int error = Marshal.GetLastWin32Error();
-
-                    if (error == ERROR_NO_MORE_ITEMS)
-                        break;
-
+                    cbSize = Marshal.SizeOf<SP_DEVICE_INTERFACE_DATA>()
+                };
+                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero,
+                    ref hidGuid, index, ref interfaceData))
+                {
+                    if (Marshal.GetLastWin32Error() != ERROR_NO_MORE_ITEMS)
+                        System.Diagnostics.Debug.WriteLine("HID interface enumeration failed.");
                     break;
                 }
 
-                string? path = GetDevicePath(
-                    deviceInfoSet,
-                    ref interfaceData);
-
+                string? path = GetDevicePath(set, ref interfaceData);
                 if (path != null && matches(path))
-                    return path;
-
-                index++;
+                    paths.Add(path);
             }
         }
         finally
         {
-            SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            SetupDiDestroyDeviceInfoList(set);
         }
-
-        return null;
+        return paths;
     }
 
     private static HidCapabilities? GetHidCapabilities(
@@ -358,6 +406,7 @@ public sealed class HidConnection : IDisposable
                 return null;
 
             return new HidCapabilities(
+                capabilities.UsagePage, capabilities.Usage,
                 capabilities.InputReportByteLength,
                 capabilities.OutputReportByteLength,
                 capabilities.FeatureReportByteLength);
@@ -369,6 +418,8 @@ public sealed class HidConnection : IDisposable
     }
 
     private readonly record struct HidCapabilities(
+        ushort UsagePage,
+        ushort Usage,
         ushort InputReportByteLength,
         ushort OutputReportByteLength,
         ushort FeatureReportByteLength);
@@ -387,7 +438,8 @@ public sealed class HidConnection : IDisposable
             ref requiredSize,
             IntPtr.Zero);
 
-        if (requiredSize == 0)
+        if (requiredSize < DEVICE_INTERFACE_PATH_OFFSET + sizeof(char) ||
+            requiredSize > int.MaxValue)
             return null;
 
         IntPtr detailBuffer =
@@ -396,10 +448,12 @@ public sealed class HidConnection : IDisposable
 
         try
         {
+            // Win32 requires sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) in cbSize:
+            // 8 bytes in x64, 6 bytes in x86. The path offset remains 4 bytes.
             Marshal.WriteInt32(
                 detailBuffer,
                 0,
-                8);
+                IntPtr.Size == 8 ? 8 : 6);
 
             bool result =
                 SetupDiGetDeviceInterfaceDetail(
@@ -417,7 +471,7 @@ public sealed class HidConnection : IDisposable
                 Marshal.PtrToStringUni(
                     IntPtr.Add(
                         detailBuffer,
-                        8));
+                        DEVICE_INTERFACE_PATH_OFFSET));
 
             if (string.IsNullOrWhiteSpace(path))
                 return null;
