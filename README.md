@@ -36,6 +36,15 @@ The application provides a convenient way to monitor your headset directly from 
 * 🪟 Native Windows / Windows Forms interface
 * 🚀 Lightweight and designed to run continuously in the background
 
+## What's New in Version 2.4.1
+
+Version 2.4.1 is a security maintenance release that updates the .NET 10 runtime bundled with the self-contained Windows application from **10.0.12** to **10.0.15**, incorporating Microsoft's runtime security fixes.
+
+* **Updated bundled runtime:** .NET 10 and Windows Desktop runtime components are refreshed to version 10.0.15. No separate .NET installation is required.
+* **Existing functionality preserved:** headset support, battery monitoring, notifications, and the interface remain unchanged.
+
+For more information, see the [v2.4.1 release notes](Release/ReleaseNotes-v2.4.1.md).
+
 ## What's New in Version 2.4.0
 
 Version 2.4.0 consolidates the changes from the 2.4.0 beta series, expanding HyperX headset/receiver compatibility and improving detection, update delivery, and installation reliability.
@@ -174,7 +183,7 @@ These screenshots illustrate earlier versions.
 
 Download the latest version from the **Releases** section of this repository.
 
-Run the installer and follow the installation instructions. The Stable 2.4.0 installer is named `HyperBatteryMonitor-Setup-v2.4.0.exe`.
+Run the installer and follow the installation instructions. The latest Stable installer is named `HyperBatteryMonitor-Setup-v2.4.1.exe`.
 
 After installation, Hyper Battery Monitor runs in the Windows system tray.
 
@@ -285,11 +294,11 @@ These options can be configured independently through the Settings window.
 
 ## Project Status
 
-**Version:** 2.4.0
+**Version:** 2.4.1
 
 **Status:** Stable release
 
-Version 2.4.0 adds adaptive HID endpoint discovery, additional headset/receiver variants, Windows Bluetooth battery fallback on supported models, and more reliable in-app updates and Clean Installation.
+Version 2.4.1 updates the bundled .NET 10 runtime to 10.0.15 for security maintenance. Headset compatibility and the features introduced in version 2.4.0 remain unchanged.
 
 The project remains under active development, and additional devices and features may be added in future versions.
 
