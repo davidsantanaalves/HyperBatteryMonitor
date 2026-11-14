@@ -1,0 +1,1 @@
+Hyper Battery Monitor v2.4.1 is a security maintenance update that refreshes the .NET 10 runtime bundled with the Windows application from 10.0.12 to 10.0.15, incorporating Microsoft's runtime security fixes. This update does not change headset support, battery monitoring, notifications, or the user interface.
