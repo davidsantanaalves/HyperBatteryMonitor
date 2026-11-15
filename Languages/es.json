@@ -220,5 +220,14 @@
   "UpdatesReleaseNotesTitle": "Novedades de {0}",
   "UpdatesReleaseNotesUnavailable": "Las notas de esta versión no están disponibles. Puedes abrir la publicación en GitHub.",
   "UpdatesViewOnGitHub": "Ver en GitHub",
-  "UpdatesClose": "Cerrar"
+  "UpdatesClose": "Cerrar",
+  "BetaDiagnosticsConsentTitle": "Registro de diagnóstico de la versión beta",
+  "BetaDiagnosticsConsentBody": "Esta es una versión beta de Hyper Battery Monitor. Los registros de diagnóstico locales son opcionales y ayudan a investigar errores y mejorar la compatibilidad. Si acepta, HBM guardará el estado de los auriculares (batería, carga, conexión y micrófono silenciado), los tipos de eventos HID, la versión de la aplicación, los errores y las acciones de recuperación en Documentos\\HBM Logs. Los registros no se envían automáticamente. Puede revisarlos y compartirlos manualmente al informar un problema. Los registros antiguos se eliminan después de 14 días o al alcanzar 100 MB.\n\nSi rechaza, podrá seguir utilizando la beta normalmente, pero HBM no recopilará registros de diagnóstico, esenciales para investigar muchos errores. Podrá activar la telemetría más tarde en Configuración > Acerca de > Activar telemetría.",
+  "BetaDiagnosticsConsentSaveError": "No se pudo guardar su preferencia. La beta continuará sin registros de diagnóstico.",
+  "BetaDiagnosticsOpenFolder": "Abrir carpeta de registros de diagnóstico",
+  "BetaDiagnosticsOpenFolderError": "No se pudo abrir la carpeta de registros de diagnóstico.",
+  "BetaDiagnosticsAccept": "Aceptar y continuar",
+  "BetaDiagnosticsEnable": "Activar telemetría",
+  "BetaDiagnosticsDecline": "Continuar sin telemetría",
+  "BetaDiagnosticsCloudSyncNotice": "HBM no sube estos registros. Si la carpeta Documentos está sincronizada con OneDrive u otro servicio de copia de seguridad, ese servicio puede copiarlos a la nube."
 }

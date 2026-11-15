@@ -1,4 +1,5 @@
 using HyperXBatteryTray.Devices;
+using HyperXBatteryTray.Diagnostics;
 
 namespace HyperXBatteryTray.Monitoring;
 
@@ -6,6 +7,8 @@ public sealed class BatteryMonitor : IDisposable
 {
     private readonly IHyperXDevice _device;
 
+    private readonly SemaphoreSlim _wake = new(0, 1);
+    private volatile bool _physicalDisconnected;
     private CancellationTokenSource? _cancellation;
     private Task? _monitorTask;
 
@@ -22,6 +25,8 @@ public sealed class BatteryMonitor : IDisposable
         _device.BatteryChanged += Device_BatteryChanged;
         _device.ChargingChanged += Device_ChargingChanged;
         _device.MicrophoneMuteChanged += Device_MicrophoneMuteChanged;
+        if (_device is IEventDrivenHidDevice events)
+            events.PhysicalConnectionChanged += Device_PhysicalConnectionChanged;
     }
 
     public int IntervalMilliseconds { get; set; } = 5000;
@@ -50,18 +55,26 @@ public sealed class BatteryMonitor : IDisposable
         {
             try
             {
+                if (_physicalDisconnected)
+                {
+                    _physicalDisconnected = false;
+                    BetaDiagnostics.Write("Monitor.PhysicalDisconnect", new { Model = _device.Name });
+                    _device.Disconnect();
+                    ResetDisconnectedState();
+                    UpdateConnectionState(false);
+                }
                 if (!_device.IsConnected)
                 {
                     bool connected = _device.Connect();
 
-                    UpdateConnectionState(connected);
+                    // Opening a USB/HID or Bluetooth transport does not prove the
+                    // headset is responsive. Publish Connected only after a valid
+                    // battery response, regardless of the device implementation.
+                    BetaDiagnostics.Write("Monitor.ConnectAttempt", new { Model = _device.Name, Connected = connected });
 
                     if (!connected)
                     {
-                        await Task.Delay(
-                            IntervalMilliseconds,
-                            cancellationToken);
-
+                        await WaitForNextCycleAsync(IntervalMilliseconds, cancellationToken);
                         continue;
                     }
 
@@ -71,16 +84,14 @@ public sealed class BatteryMonitor : IDisposable
                 int? battery = await _device.QueryBatteryAsync(
                     cancellationToken);
 
-                if (!battery.HasValue)
+                if (!battery.HasValue || battery.Value is < 0 or > 100)
                 {
+                    BetaDiagnostics.Write("Monitor.BatteryQueryFailed", new { Model = _device.Name });
                     _device.Disconnect();
                     ResetDisconnectedState();
                     UpdateConnectionState(false);
 
-                    await Task.Delay(
-                        IntervalMilliseconds,
-                        cancellationToken);
-
+                    await WaitForNextCycleAsync(IntervalMilliseconds, cancellationToken);
                     continue;
                 }
 
@@ -100,6 +111,11 @@ public sealed class BatteryMonitor : IDisposable
                     _lastMicrophoneMuteState = null;
                 }
 
+                // The common monitor's Connected state means a verified, live
+                // headset, not merely an opened receiver/transport. This also
+                // covers receiver-aware and Bluetooth fallback implementations.
+                UpdateConnectionState(true);
+                BetaDiagnostics.Write("Monitor.BatteryQuery", new { Model = _device.Name, Battery = battery.Value });
                 UpdateBatteryState(battery.Value);
 
                 bool? chargeStatus = await _device.QueryChargeStatusAsync(
@@ -128,16 +144,33 @@ public sealed class BatteryMonitor : IDisposable
                     }
                 }
 
-                await Task.Delay(
-                    IntervalMilliseconds,
-                    cancellationToken);
+                bool canUseEvents = _device is IEventDrivenHidDevice live &&
+                    live.SupportsEventDrivenBattery;
+                // Only Beta builds opt other receiver families into reduced
+                // querying. The opt-in is explicit per verified parser shape:
+                // a continuous HID reader without unsolicited battery support
+                // must keep its original five-second polling cadence.
+                bool betaNotifications = AppReleaseInfo.IsBeta &&
+                    _device is IBetaBatteryNotificationDevice notifications &&
+                    notifications.SupportsUnsolicitedBatteryNotifications;
+                bool reducedPolling = canUseEvents || betaNotifications;
+                int interval = reducedPolling ? 60000 : IntervalMilliseconds;
+                BetaDiagnostics.Write("Monitor.CycleComplete", new
+                {
+                    Model = _device.Name,
+                    Mode = canUseEvents ? "EventDriven" :
+                        betaNotifications ? "BetaNotificationAssisted" : "Polling",
+                    RecoveryIntervalMs = interval
+                });
+                await WaitForNextCycleAsync(interval, cancellationToken);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                BetaDiagnostics.WriteError("Monitor.UnhandledCycleError", ex);
                 if (_device.IsConnected)
                     _device.Disconnect();
 
@@ -146,9 +179,7 @@ public sealed class BatteryMonitor : IDisposable
 
                 try
                 {
-                    await Task.Delay(
-                        IntervalMilliseconds,
-                        cancellationToken);
+                    await WaitForNextCycleAsync(IntervalMilliseconds, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -158,19 +189,35 @@ public sealed class BatteryMonitor : IDisposable
         }
     }
 
+    private async Task WaitForNextCycleAsync(int milliseconds, CancellationToken cancellationToken)
+    {
+        await _wake.WaitAsync(milliseconds, cancellationToken);
+    }
+
+    private void Device_PhysicalConnectionChanged(object? sender, bool connected)
+    {
+        BetaDiagnostics.Write("Monitor.PhysicalConnection", new { Model = _device.Name, Connected = connected });
+        if (!connected)
+            _physicalDisconnected = true;
+        try { if (_wake.CurrentCount == 0) _wake.Release(); } catch (SemaphoreFullException) { }
+    }
+
     private void Device_BatteryChanged(object? sender, int battery)
     {
+        BetaDiagnostics.Write("Monitor.BatteryChanged", new { Model = _device.Name, Battery = battery });
         if (battery >= 0)
             UpdateBatteryState(battery);
     }
 
     private void Device_ChargingChanged(object? sender, bool charging)
     {
+        BetaDiagnostics.Write("Monitor.ChargingEvent", new { Model = _device.Name, Charging = charging });
         UpdateChargingState(charging);
     }
 
     private void Device_MicrophoneMuteChanged(object? sender, bool muted)
     {
+        BetaDiagnostics.Write("Monitor.MuteEvent", new { Model = _device.Name, Muted = muted });
         _microphoneStateInitialized = true;
         UpdateMicrophoneMuteState(muted);
     }
@@ -226,6 +273,8 @@ public sealed class BatteryMonitor : IDisposable
         _device.BatteryChanged -= Device_BatteryChanged;
         _device.ChargingChanged -= Device_ChargingChanged;
         _device.MicrophoneMuteChanged -= Device_MicrophoneMuteChanged;
+        if (_device is IEventDrivenHidDevice events)
+            events.PhysicalConnectionChanged -= Device_PhysicalConnectionChanged;
 
         _device.Disconnect();
         _cancellation?.Dispose();

@@ -1,4 +1,5 @@
 using HyperXBatteryTray.Updates;
+using HyperXBatteryTray.Diagnostics;
 
 namespace HyperXBatteryTray.Settings;
 
@@ -7,6 +8,7 @@ public sealed partial class SettingsForm
     private const int AboutUpdatesCardLogicalHeight = 204;
     private LinkLabel? _updatesStatusLabel;
     private ActionButton? _updatesCheckButton;
+    private ActionButton? _updatesDiagnosticsButton;
     private ActionButton? _updatesDownloadButton;
     private ActionButton? _updatesInstallButton;
     private ActionButton? _updatesLaterButton;
@@ -134,11 +136,17 @@ public sealed partial class SettingsForm
         _updatesActionRow.SizeChanged += (_, _) => ResizeUpdateActionButtons();
 
         _updatesCheckButton = CreateUpdateButton("UpdatesCheck", dark);
+        if (AppReleaseInfo.IsBeta)
+            _updatesDiagnosticsButton = CreateUpdateButton(
+                _settings.BetaDiagnosticsConsentVersion == BetaDiagnostics.ConsentVersion
+                    ? "BetaDiagnosticsOpenFolder" : "BetaDiagnosticsEnable", dark);
         _updatesDownloadButton = CreateUpdateButton("UpdatesDownload", dark);
         _updatesInstallButton = CreateUpdateButton("UpdatesInstall", dark);
         _updatesLaterButton = CreateUpdateButton("UpdatesLater", dark);
 
         _updatesActionRow.Controls.Add(_updatesCheckButton);
+        if (_updatesDiagnosticsButton is not null)
+            _updatesActionRow.Controls.Add(_updatesDiagnosticsButton);
         _updatesActionRow.Controls.Add(_updatesDownloadButton);
         _updatesActionRow.Controls.Add(_updatesInstallButton);
         _updatesActionRow.Controls.Add(_updatesLaterButton);
@@ -148,6 +156,61 @@ public sealed partial class SettingsForm
             if (_updateCoordinator is not null)
                 await _updateCoordinator.CheckAsync(true);
         };
+        if (_updatesDiagnosticsButton is not null)
+        {
+            _updatesDiagnosticsButton.Click += (_, _) =>
+            {
+                if (_settings.BetaDiagnosticsConsentVersion != BetaDiagnostics.ConsentVersion)
+                {
+                    using BetaConsentDialog consent = new(_selectedLanguage, _selectedTheme);
+                    if (consent.ShowDialog(this) != DialogResult.OK)
+                        return;
+
+                    try
+                    {
+                        // Save a fresh profile, not unrelated pending changes in
+                        // this Settings dialog that the user has not applied.
+                        SettingsManager manager = new();
+                        AppSettings persisted = manager.Load();
+                        persisted.BetaDiagnosticsConsentVersion = BetaDiagnostics.ConsentVersion;
+                        manager.Save(persisted);
+                        _settings.BetaDiagnosticsConsentVersion = BetaDiagnostics.ConsentVersion;
+                    }
+                    catch
+                    {
+                        MessageBox.Show(this, L("BetaDiagnosticsConsentSaveError"),
+                            L("BetaDiagnosticsConsentTitle"),
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    BetaDiagnostics.Start();
+                    BetaDiagnostics.Write("Diagnostics.EnabledFromAbout", new
+                    {
+                        Version = AppReleaseInfo.SemanticVersion
+                    });
+                    _updatesDiagnosticsButton.Text = L("BetaDiagnosticsOpenFolder");
+                    ResizeUpdateActionButtons();
+                    return;
+                }
+
+                try
+                {
+                    Directory.CreateDirectory(BetaDiagnostics.LogsFolder);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = BetaDiagnostics.LogsFolder,
+                        UseShellExecute = true
+                    });
+                }
+                catch
+                {
+                    MessageBox.Show(this, L("BetaDiagnosticsOpenFolderError"),
+                        L("BetaDiagnosticsConsentTitle"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+        }
         _updatesDownloadButton.Click += async (_, _) =>
         {
             if (_updateCoordinator is null ||
@@ -338,12 +401,14 @@ public sealed partial class SettingsForm
             _updatesActionRow.ClientSize.Width <= 0)
             return;
 
-        ActionButton[] buttons =
+        ActionButton?[] buttons =
         {
-            _updatesCheckButton, _updatesDownloadButton,
-            _updatesInstallButton, _updatesLaterButton
+            _updatesCheckButton,
+            _updatesDiagnosticsButton,
+            _updatesDownloadButton, _updatesInstallButton, _updatesLaterButton
         };
         ActionButton[] visible = buttons
+            .OfType<ActionButton>()
             .Where(button => button is { IsDisposed: false, Visible: true })
             .ToArray();
         if (visible.Length == 0)

@@ -220,5 +220,14 @@
   "UpdatesReleaseNotesTitle": "Novidades da versão {0}",
   "UpdatesReleaseNotesUnavailable": "As notas desta versão não estão disponíveis. Você pode abrir o release no GitHub.",
   "UpdatesViewOnGitHub": "Ver no GitHub",
-  "UpdatesClose": "Fechar"
+  "UpdatesClose": "Fechar",
+  "BetaDiagnosticsConsentTitle": "Registro de diagnósticos da versão Beta",
+  "BetaDiagnosticsConsentBody": "Esta é uma versão Beta do Hyper Battery Monitor. Os logs locais de diagnóstico são opcionais e ajudam a investigar erros e melhorar a compatibilidade. Se você aceitar, o HBM registrará o estado do headset (bateria, carregamento, conexão e microfone mudo), tipos de eventos HID, versão do aplicativo, erros e ações de recuperação em Documentos\\HBM Logs. Nenhum log é enviado automaticamente. Você poderá revisar e compartilhar os arquivos manualmente ao relatar um problema. Os logs antigos são removidos após 14 dias ou quando o total atingir 100 MB.\n\nSe recusar, você continuará usando a versão Beta normalmente, mas o HBM não coletará logs de diagnóstico, essenciais para investigar muitos erros. Você poderá ativar a telemetria depois em Configurações > About > Ativar telemetria.",
+  "BetaDiagnosticsConsentSaveError": "Não foi possível salvar sua preferência. A versão Beta continuará sem registrar logs de diagnóstico.",
+  "BetaDiagnosticsOpenFolder": "Abrir pasta de logs de diagnóstico",
+  "BetaDiagnosticsOpenFolderError": "Não foi possível abrir a pasta de logs de diagnóstico.",
+  "BetaDiagnosticsAccept": "Aceitar e continuar",
+  "BetaDiagnosticsEnable": "Ativar telemetria",
+  "BetaDiagnosticsDecline": "Continuar sem telemetria",
+  "BetaDiagnosticsCloudSyncNotice": "O HBM nunca envia esses logs pela internet. Se a pasta Documentos estiver sincronizada pelo OneDrive ou por outro serviço de backup, esse serviço poderá copiá-los para a nuvem."
 }

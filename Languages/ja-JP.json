@@ -220,5 +220,14 @@
   "UpdatesReleaseNotesTitle": "{0} の新機能",
   "UpdatesReleaseNotesUnavailable": "このバージョンのリリースノートはありません。GitHub でリリースを確認できます。",
   "UpdatesViewOnGitHub": "GitHub で表示",
-  "UpdatesClose": "閉じる"
+  "UpdatesClose": "閉じる",
+  "BetaDiagnosticsConsentTitle": "ベータ版診断ログ",
+  "BetaDiagnosticsConsentBody": "これは Hyper Battery Monitor のベータ版です。任意のローカル診断ログは、不具合の調査とデバイスの互換性向上に役立ちます。同意すると、ヘッドセットの状態（バッテリー、充電、接続、マイクのミュート）、HID イベントの種類、アプリのバージョン、エラー、復旧処理が「ドキュメント\\HBM Logs」に記録されます。ログが自動送信されることはありません。内容を確認し、不具合報告時に手動で共有できます。古いログは14日後、または合計100 MBに達すると削除されます。\n\n同意しなくてもベータ版を通常どおり使用できます。ただし、多くの不具合の調査に不可欠な診断ログは収集されません。後から「設定 > バージョン情報 > テレメトリを有効にする」で有効化できます。",
+  "BetaDiagnosticsConsentSaveError": "設定を保存できませんでした。ベータ版は診断ログなしで続行します。",
+  "BetaDiagnosticsOpenFolder": "診断ログフォルダーを開く",
+  "BetaDiagnosticsOpenFolderError": "診断ログフォルダーを開けませんでした。",
+  "BetaDiagnosticsAccept": "同意して続行",
+  "BetaDiagnosticsEnable": "テレメトリを有効にする",
+  "BetaDiagnosticsDecline": "テレメトリなしで続行",
+  "BetaDiagnosticsCloudSyncNotice": "HBM 自体がログをアップロードすることはありません。ただし、ドキュメントフォルダーを OneDrive などで同期している場合、そのサービスがログをクラウドにコピーすることがあります。"
 }
