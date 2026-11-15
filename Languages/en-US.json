@@ -220,5 +220,14 @@
   "UpdatesReleaseNotesTitle": "What's new in {0}",
   "UpdatesReleaseNotesUnavailable": "Release notes aren't available for this version. You can open the release on GitHub.",
   "UpdatesViewOnGitHub": "View on GitHub",
-  "UpdatesClose": "Close"
+  "UpdatesClose": "Close",
+  "BetaDiagnosticsConsentTitle": "Beta diagnostic logging",
+  "BetaDiagnosticsConsentBody": "This is a beta version of Hyper Battery Monitor. Optional local diagnostic logs can help investigate errors and improve device compatibility. If you accept, HBM records headset status (battery, charging, connection and mute), HID event types, application version, errors and recovery actions in Documents\\HBM Logs. No logs are transmitted automatically. You can review and manually share them when reporting an issue. Old logs are removed after 14 days or when storage reaches 100 MB.\n\nIf you decline, you can still use the Beta normally, but HBM will not collect diagnostic logs, which are essential for investigating many bugs. You can enable telemetry later in Settings > About > Enable telemetry.",
+  "BetaDiagnosticsConsentSaveError": "Unable to save your telemetry preference. The Beta will continue without diagnostic logging.",
+  "BetaDiagnosticsOpenFolder": "Open diagnostic logs folder",
+  "BetaDiagnosticsOpenFolderError": "Unable to open the diagnostic logs folder.",
+  "BetaDiagnosticsAccept": "Accept and continue",
+  "BetaDiagnosticsEnable": "Enable telemetry",
+  "BetaDiagnosticsDecline": "Continue without telemetry",
+  "BetaDiagnosticsCloudSyncNotice": "HBM itself never uploads these logs. If your Documents folder is synchronized by OneDrive or another backup service, that service may copy the logs to the cloud."
 }

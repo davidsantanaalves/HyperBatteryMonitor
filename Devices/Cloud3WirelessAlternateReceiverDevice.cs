@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISelectableHidEndpoint
+public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice
 {
     private const byte ProtocolReportId = 0x66;
     private const byte BatteryResponseSelector = 0x89;
@@ -65,6 +65,10 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
 
     public bool SupportsMicrophoneMuteMonitoring =>
         Definition.SupportsMicrophoneMuteMonitoring;
+
+    // This alternate receiver has an independent 66:0D notification parser.
+    // It is not the hardware-validated 03F0:05B7 event-driven implementation.
+    public bool SupportsUnsolicitedBatteryNotifications => true;
 
     public event EventHandler<int>? BatteryChanged;
 

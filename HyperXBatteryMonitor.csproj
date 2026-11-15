@@ -7,10 +7,10 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.4.1</Version>
+    <Version>2.5.0</Version>
     <!-- Single source of truth for build channel and Beta sequence. -->
-    <ReleaseChannel>Stable</ReleaseChannel>
-    <BetaNumber>6</BetaNumber>
+    <ReleaseChannel>Beta</ReleaseChannel>
+    <BetaNumber>1</BetaNumber>
     <InformationalVersion Condition="'$(ReleaseChannel)' == 'Stable'">$(Version)</InformationalVersion>
     <InformationalVersion Condition="'$(ReleaseChannel)' == 'Beta'">$(Version)-beta.$(BetaNumber)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>

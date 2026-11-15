@@ -41,6 +41,10 @@ public sealed class Cloud3SWirelessDevice : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    // The existing parser handles unsolicited battery reports independently
+    // of replies to explicit queries. Experimental 60-second recovery in Beta.
+    public override bool SupportsUnsolicitedBatteryNotifications => true;
+
     protected override byte[]? CreateChargeStatusCommand() =>
         CreateCommand(ChargeCommandBytes);
 

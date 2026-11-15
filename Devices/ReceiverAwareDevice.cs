@@ -9,7 +9,7 @@ namespace HyperXBatteryTray.Devices;
 /// endpoint is active at a time. Previously successful collections are tried
 /// first, but are never trusted without a fresh response after reconnection.
 /// </summary>
-internal sealed class ReceiverAwareDevice : IHyperXDevice
+internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice
 {
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
@@ -48,6 +48,13 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice
         Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
         _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
 
+    public bool SupportsUnsolicitedBatteryNotifications => _verified &&
+        Volatile.Read(ref _active) is IBetaBatteryNotificationDevice notifications &&
+        notifications.SupportsUnsolicitedBatteryNotifications;
+
+    public bool SupportsEventDrivenBattery => _verified &&
+        Volatile.Read(ref _active) is IEventDrivenHidDevice events && events.SupportsEventDrivenBattery;
+    public event EventHandler<bool>? PhysicalConnectionChanged;
     public event EventHandler<int>? BatteryChanged;
     public event EventHandler<bool>? ChargingChanged;
     public event EventHandler<bool>? MicrophoneMuteChanged;
@@ -266,6 +273,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice
     {
         if (_verified || _active == null) return;
         _verified = true;
+        if (_active is IEventDrivenHidDevice events)
+            events.PhysicalConnectionChanged += Active_PhysicalConnectionChanged;
         _active.BatteryChanged += Active_BatteryChanged;
         _active.ChargingChanged += Active_ChargingChanged;
         _active.MicrophoneMuteChanged += Active_MicrophoneMuteChanged;
@@ -283,6 +292,12 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice
     public Task<bool?> QueryMicrophoneMuteStatusAsync(CancellationToken cancellationToken = default) =>
         _verified ? Volatile.Read(ref _active)?.QueryMicrophoneMuteStatusAsync(cancellationToken)
             ?? Task.FromResult<bool?>(null) : Task.FromResult<bool?>(null);
+
+    private void Active_PhysicalConnectionChanged(object? sender, bool connected)
+    {
+        if (ReferenceEquals(sender, Volatile.Read(ref _active)))
+            PhysicalConnectionChanged?.Invoke(this, connected);
+    }
 
     private void Active_BatteryChanged(object? sender, int battery)
     {
@@ -306,6 +321,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice
         _activeIndex = -1;
         _verified = false;
         if (old == null) return;
+        if (old is IEventDrivenHidDevice events)
+            events.PhysicalConnectionChanged -= Active_PhysicalConnectionChanged;
         old.BatteryChanged -= Active_BatteryChanged;
         old.ChargingChanged -= Active_ChargingChanged;
         old.MicrophoneMuteChanged -= Active_MicrophoneMuteChanged;

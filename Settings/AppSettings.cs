@@ -61,6 +61,7 @@ public sealed class AppSettings
     public AppTheme Theme { get; set; } = AppTheme.System;
     public bool ThemeConfigured { get; set; }
     public UpdateChannelEnum UpdateChannel { get; set; } = AppReleaseInfo.DefaultUpdateChannel;
+    public int BetaDiagnosticsConsentVersion { get; set; }
     public bool UpdateChannelUserSelected { get; set; }
     public UpdateDownloadModeEnum UpdateDownloadMode { get; set; } = UpdateDownloadModeEnum.NotifyBeforeDownload;
 

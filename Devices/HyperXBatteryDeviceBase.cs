@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint
+public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice
 {
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(2);
 
@@ -42,6 +42,10 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     protected HidConnection Connection => _connection;
 
     protected virtual bool UsesContinuousReader => false;
+
+    // Opt-in per protocol; a continuous reader alone does not imply that a
+    // headset sends unsolicited battery notifications.
+    public virtual bool SupportsUnsolicitedBatteryNotifications => false;
 
     public string Name => Definition.Name;
 

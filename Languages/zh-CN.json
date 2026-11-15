@@ -220,5 +220,14 @@
   "UpdatesReleaseNotesTitle": "{0} 更新内容",
   "UpdatesReleaseNotesUnavailable": "此版本暂无发行说明。您可以在 GitHub 上查看该版本。",
   "UpdatesViewOnGitHub": "在 GitHub 上查看",
-  "UpdatesClose": "关闭"
+  "UpdatesClose": "关闭",
+  "BetaDiagnosticsConsentTitle": "测试版诊断日志",
+  "BetaDiagnosticsConsentBody": "这是 Hyper Battery Monitor 测试版。可选的本地诊断日志有助于调查错误并改善设备兼容性。同意后，HBM 会将耳机状态（电量、充电、连接和麦克风静音）、HID 事件类型、应用版本、错误及恢复操作记录到“文档\\HBM Logs”。日志不会自动上传。您可以查看内容并在报告问题时手动分享。旧日志将在 14 天后或总量达到 100 MB 时删除。\n\n即使拒绝，您也可以正常使用测试版，但 HBM 不会收集诊断日志，而这些日志对排查许多问题至关重要。您以后可以通过“设置 > 关于 > 启用遥测”开启。",
+  "BetaDiagnosticsConsentSaveError": "无法保存您的选择。测试版将继续运行，不记录诊断日志。",
+  "BetaDiagnosticsOpenFolder": "打开诊断日志文件夹",
+  "BetaDiagnosticsOpenFolderError": "无法打开诊断日志文件夹。",
+  "BetaDiagnosticsAccept": "同意并继续",
+  "BetaDiagnosticsEnable": "启用遥测",
+  "BetaDiagnosticsDecline": "不启用遥测并继续",
+  "BetaDiagnosticsCloudSyncNotice": "HBM 本身不会上传这些日志。但是，如果“文档”文件夹通过 OneDrive 或其他备份服务同步，该服务可能会将日志复制到云端。"
 }

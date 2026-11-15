@@ -47,6 +47,10 @@ public sealed class CloudMix2Device : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    // The existing parser handles unsolicited battery reports independently
+    // of replies to explicit queries. Experimental 60-second recovery in Beta.
+    public override bool SupportsUnsolicitedBatteryNotifications => true;
+
     public override async Task<int?> QueryBatteryAsync(CancellationToken cancellationToken = default)
     {
         byte[]? connection = await QuerySelectorAsync(ConnectionSelector, cancellationToken).ConfigureAwait(false);

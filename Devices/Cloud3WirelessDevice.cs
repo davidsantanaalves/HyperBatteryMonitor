@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public sealed class Cloud3WirelessDevice : IHyperXDevice
+public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice
 {
     private const byte ProtocolReportId = 0x66;
     private const byte BatteryResponseSelector = 0x89;
@@ -62,6 +62,8 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice
     public bool SupportsMicrophoneMuteMonitoring =>
         Definition.SupportsMicrophoneMuteMonitoring;
 
+    public bool SupportsEventDrivenBattery => true;
+    public event EventHandler<bool>? PhysicalConnectionChanged;
     public event EventHandler<int>? BatteryChanged;
 
     public event EventHandler<bool>? ChargingChanged;
@@ -260,12 +262,14 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice
             {
                 break;
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderIoError", ex);
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderError", ex);
                 if (cancellationToken.IsCancellationRequested)
                     break;
             }
@@ -278,6 +282,25 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice
             return;
 
         byte selector = report[1];
+        if (selector is 0x0A or 0x0B or 0x0C or 0x0D)
+        {
+            // Protocol metadata only; never write arbitrary HID payloads or paths.
+            HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.UnsolicitedReport", new
+            {
+                Model = Name, Selector = selector.ToString("X2"),
+                Byte2 = report.Length > 2 ? (int)report[2] : -1,
+                Byte3 = report.Length > 3 ? (int)report[3] : -1,
+                Byte4 = report.Length > 4 ? (int)report[4] : -1
+            });
+        }
+        if (selector == 0x0B && report.Length >= 3)
+        {
+            bool physicallyConnected = report[2] == 1;
+            HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.ConnectionNotification",
+                new { Model = Name, Connected = physicallyConnected, Selector = "66:0B" });
+            PhysicalConnectionChanged?.Invoke(this, physicallyConnected);
+            return;
+        }
 
         if ((selector == ChargeResponseSelector ||
              selector == ChargeNotificationSelector) &&
