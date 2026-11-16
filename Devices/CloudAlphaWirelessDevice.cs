@@ -39,6 +39,22 @@ public sealed class CloudAlphaWirelessDevice : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    public override bool SupportsAutoPowerOff => true;
+    protected override byte[]? CreateAutoPowerOffQueryCommand() => new byte[] { 0x21, 0xBB, 0x07 };
+    protected override byte[]? CreateAutoPowerOffSetCommand(int minutes) =>
+        new byte[] { 0x21, 0xBB, 0x12, (byte)minutes };
+
+    protected override bool TryParseAutoPowerOffReport(byte[] report, out int minutes)
+    {
+        minutes = -1;
+        if (report.Length < 4 || report[0] != 0x21 ||
+            report[1] != 0xBB || report[2] != 0x07)
+            return false;
+        minutes = report[3];
+        return IsAutoPowerOffValue(minutes);
+    }
+
+
     // The existing parser handles unsolicited battery reports independently
     // of replies to explicit queries. Experimental 60-second recovery in Beta.
     public override bool SupportsUnsolicitedBatteryNotifications => true;

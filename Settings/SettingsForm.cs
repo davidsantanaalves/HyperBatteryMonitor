@@ -162,7 +162,10 @@ public sealed partial class SettingsForm : Form
             BeginInvoke((MethodInvoker)(() =>
             {
                 if (!IsDisposed && !Disposing)
+                {
+                    LimitWindowToWorkingArea();
                     ShowPage(_currentPage);
+                }
             }));
         }
     }
@@ -285,6 +288,7 @@ public sealed partial class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = true;
         ShowInTaskbar = true;
+        // Keep the original Settings window dimensions; the Device page scrolls when needed.
         ClientSize = new Size(760, 520);
         // Standard Windows z-order: owned dialogs remain above this window
         // without preventing other applications from taking the foreground.
@@ -497,6 +501,11 @@ public sealed partial class SettingsForm : Form
 
         SubscribeToDeviceStatusEvents(_device);
         FormClosed += SettingsForm_FormClosed;
+        Shown += (_, _) => RefreshAutoPowerOffState();
+        FormClosing += (_, e) =>
+        {
+            if (_autoPowerOffApplying) e.Cancel = true;
+        };
     }
 
     internal void SetDevice(IHyperXDevice? device)

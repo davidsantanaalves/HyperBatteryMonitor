@@ -7,7 +7,7 @@ namespace HyperXBatteryTray.Devices;
 /// Bluetooth is battery-only fallback. While Bluetooth is active, HID is revalidated
 /// at a bounded interval so a transport change does not require an application restart.
 /// </summary>
-internal sealed class BluetoothFallbackDevice : IHyperXDevice
+internal sealed class BluetoothFallbackDevice : IHyperXDevice, IAutoPowerOffDevice
 {
     private const int HidFailuresBeforeBluetooth = 2;
     private static readonly TimeSpan HidRecoveryProbeInterval = TimeSpan.FromSeconds(15);
@@ -42,6 +42,20 @@ internal sealed class BluetoothFallbackDevice : IHyperXDevice
     public bool IsMicrophoneMuteStateKnown => _active?.IsMicrophoneMuteStateKnown == true;
     public bool SupportsMicrophoneMuteMonitoring =>
         _active?.SupportsMicrophoneMuteMonitoring ?? _hid.SupportsMicrophoneMuteMonitoring;
+
+    // Never expose device configuration over the battery-only Bluetooth fallback.
+    public bool SupportsAutoPowerOff => ReferenceEquals(_active, _hid) &&
+        _hid is IAutoPowerOffDevice { SupportsAutoPowerOff: true };
+
+    public Task<int?> QueryAutoPowerOffAsync(CancellationToken cancellationToken = default) =>
+        SupportsAutoPowerOff && _hid is IAutoPowerOffDevice setting
+            ? setting.QueryAutoPowerOffAsync(cancellationToken)
+            : Task.FromResult<int?>(null);
+
+    public Task<bool> SetAutoPowerOffAsync(int minutes, CancellationToken cancellationToken = default) =>
+        SupportsAutoPowerOff && _hid is IAutoPowerOffDevice setting
+            ? setting.SetAutoPowerOffAsync(minutes, cancellationToken)
+            : Task.FromResult(false);
 
     public event EventHandler<int>? BatteryChanged;
     public event EventHandler<bool>? ChargingChanged;

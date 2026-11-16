@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using HyperXBatteryTray.Devices;
+using HyperXBatteryTray.Diagnostics;
 
 namespace HyperXBatteryTray.Hid;
 
@@ -34,6 +35,28 @@ public sealed class HidConnection : IDisposable
     private FileStream? _readStream;
 
     private bool _disposed;
+    // Protect both Win32 output calls and stream writes across monitoring/UI threads.
+    private readonly object _outputGate = new();
+
+    private void TraceReport(string direction, string method, string status,
+        byte[]? report, int bytes, Exception? error = null)
+    {
+        if (!BetaDiagnostics.IsEnabled) return;
+        BetaDiagnostics.Write("HID.RawReport", new
+        {
+            Direction = direction,
+            Method = method,
+            Status = status,
+            DevicePath,
+            ReportId = bytes > 0 && report != null ? $"{report[0]:X2}" : null,
+            ReportLength = bytes,
+            Hex = report == null ? null : Convert.ToHexString(report.AsSpan(0, Math.Min(bytes, report.Length))),
+            Exception = error?.GetType().Name,
+            HResult = error?.HResult,
+            Win32Error = error is Win32Exception native ? native.NativeErrorCode : (int?)null
+        });
+    }
+
 
     public string? DevicePath { get; private set; }
 
@@ -52,6 +75,8 @@ public sealed class HidConnection : IDisposable
         ThrowIfDisposed();
 
         Close();
+        if (BetaDiagnostics.IsEnabled)
+            BetaDiagnostics.Write("HID.OpenAttempt", new { Path = devicePath });
 
         _writeHandle = CreateFile(
             devicePath,
@@ -68,6 +93,8 @@ public sealed class HidConnection : IDisposable
 
             _writeHandle.Dispose();
             _writeHandle = null;
+            if (BetaDiagnostics.IsEnabled)
+                BetaDiagnostics.Write("HID.OpenFailed", new { Path = devicePath, Stage = "WriteHandle", ErrorCode = error });
 
             throw new Win32Exception(
                 error,
@@ -88,6 +115,8 @@ public sealed class HidConnection : IDisposable
         {
             int error = Marshal.GetLastWin32Error();
 
+            if (BetaDiagnostics.IsEnabled)
+                BetaDiagnostics.Write("HID.OpenFailed", new { Path = devicePath, Stage = "ReadHandle", ErrorCode = error });
             Close();
 
             throw new Win32Exception(
@@ -124,45 +153,97 @@ public sealed class HidConnection : IDisposable
             isAsync: false);
 
         DevicePath = devicePath;
+        if (BetaDiagnostics.IsEnabled)
+            BetaDiagnostics.Write("HID.Opened", new { DevicePath, InputReportByteLength, OutputReportByteLength, FeatureReportByteLength });
 
         return true;
     }
 
-    public void Write(byte[] report)
+    private byte[] PrepareOutputReport(byte[] report)
     {
         ThrowIfDisposed();
-
-        if (_writeStream == null || OutputReportByteLength <= 0)
-        {
+        ArgumentNullException.ThrowIfNull(report);
+        if (_writeHandle is not { IsInvalid: false, IsClosed: false } || OutputReportByteLength <= 0)
+            throw new InvalidOperationException("O dispositivo HID não está aberto.");
+        if (report.Length == 0 || report.Length > OutputReportByteLength)
             throw new InvalidOperationException(
-                "O dispositivo HID não está aberto.");
-        }
+                $"O comando HID possui {report.Length} bytes, mas o dispositivo aceita {OutputReportByteLength} bytes.");
+        if (report.Length == OutputReportByteLength) return report;
+        byte[] padded = new byte[OutputReportByteLength];
+        Buffer.BlockCopy(report, 0, padded, 0, report.Length);
+        return padded;
+    }
 
-        if (report.Length > OutputReportByteLength)
-        {
-            throw new InvalidOperationException(
-                $"O comando HID possui {report.Length} bytes, mas o dispositivo " +
-                $"aceita reports de saída de {OutputReportByteLength} bytes.");
-        }
-
+    public void Write(byte[] report)
+    {
         byte[] outputReport;
-
-        if (report.Length == OutputReportByteLength)
+        try { outputReport = PrepareOutputReport(report); }
+        catch (Exception ex)
         {
-            outputReport = report;
+            TraceReport("TX", "FileStream.Write", "Rejected", report, report?.Length ?? 0, ex);
+            throw;
         }
-        else
+        lock (_outputGate)
         {
-            outputReport = new byte[OutputReportByteLength];
-            Buffer.BlockCopy(report, 0, outputReport, 0, report.Length);
+            try
+            {
+                if (_writeStream == null)
+                    throw new InvalidOperationException("O dispositivo HID não está aberto para escrita.");
+                _writeStream.Write(outputReport, 0, outputReport.Length);
+                _writeStream.Flush();
+                TraceReport("TX", "FileStream.Write", "Success", outputReport, outputReport.Length);
+            }
+            catch (Exception ex)
+            {
+                TraceReport("TX", "FileStream.Write", "Error", outputReport, outputReport.Length, ex);
+                throw;
+            }
         }
+    }
 
-        _writeStream.Write(
-            outputReport,
-            0,
-            outputReport.Length);
-
-        _writeStream.Flush();
+    /// <summary>
+    /// Configuration commands use the native HID output-report API, as supported
+    /// by NGENUITY; fall back to the existing stream transport if unsupported.
+    /// Never infer successful device persistence from successful USB submission.
+    /// </summary>
+    public void WriteConfigurationReport(byte[] report)
+    {
+        byte[] outputReport;
+        try { outputReport = PrepareOutputReport(report); }
+        catch (Exception ex)
+        {
+            TraceReport("TX", "HidD_SetOutputReport", "Rejected", report, report?.Length ?? 0, ex);
+            throw;
+        }
+        lock (_outputGate)
+        {
+            if (HidD_SetOutputReport(_writeHandle!, outputReport, outputReport.Length))
+            {
+                TraceReport("TX", "HidD_SetOutputReport", "Success", outputReport, outputReport.Length);
+                return;
+            }
+            int error = Marshal.GetLastWin32Error();
+            if (BetaDiagnostics.IsEnabled)
+                BetaDiagnostics.Write("HID.OutputReportFallback", new
+                {
+                    DevicePath, Win32Error = error,
+                    Method = "HidD_SetOutputReport", Status = "NativeCallFailed",
+                    Hex = Convert.ToHexString(outputReport)
+                });
+            try
+            {
+                if (_writeStream == null)
+                    throw new InvalidOperationException("O dispositivo HID não está aberto para escrita.");
+                _writeStream.Write(outputReport, 0, outputReport.Length);
+                _writeStream.Flush();
+                TraceReport("TX", "FileStream.Write (fallback)", "Success", outputReport, outputReport.Length);
+            }
+            catch (Exception ex)
+            {
+                TraceReport("TX", "FileStream.Write (fallback)", "Error", outputReport, outputReport.Length, ex);
+                throw;
+            }
+        }
     }
 
     public void SetFeatureReport(byte[] report)
@@ -170,27 +251,48 @@ public sealed class HidConnection : IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(report);
         ValidateFeatureReportHandle();
-
         if (report.Length == 0 || report.Length > FeatureReportByteLength)
             throw new ArgumentException("Invalid HID feature report size.", nameof(report));
-
         byte[] buffer = new byte[FeatureReportByteLength];
         Buffer.BlockCopy(report, 0, buffer, 0, report.Length);
-        if (!HidD_SetFeature(_writeHandle!, buffer, buffer.Length))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        lock (_outputGate)
+        {
+            try
+            {
+                if (!HidD_SetFeature(_writeHandle!, buffer, buffer.Length))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                TraceReport("TX", "HidD_SetFeature", "Success", buffer, buffer.Length);
+            }
+            catch (Exception ex)
+            {
+                TraceReport("TX", "HidD_SetFeature", "Error", buffer, buffer.Length, ex);
+                throw;
+            }
+        }
     }
 
     public byte[] GetFeatureReport(byte reportId)
     {
         ThrowIfDisposed();
         ValidateFeatureReportHandle();
-
         byte[] buffer = new byte[FeatureReportByteLength];
         buffer[0] = reportId;
-        if (!HidD_GetFeature(_writeHandle!, buffer, buffer.Length))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-
-        return buffer;
+        lock (_outputGate)
+        {
+            try
+            {
+                TraceReport("TX", "HidD_GetFeature.Request", "Started", buffer, 1);
+                if (!HidD_GetFeature(_writeHandle!, buffer, buffer.Length))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                TraceReport("RX", "HidD_GetFeature", "Success", buffer, buffer.Length);
+                return buffer;
+            }
+            catch (Exception ex)
+            {
+                TraceReport("RX", "HidD_GetFeature", "Error", buffer, buffer.Length, ex);
+                throw;
+            }
+        }
     }
 
     private void ValidateFeatureReportHandle()
@@ -220,8 +322,12 @@ public sealed class HidConnection : IDisposable
                     cancellationToken);
 
             if (bytesRead <= 0)
+            {
+                TraceReport("RX", "FileStream.ReadAsync", "EndOfStream", null, 0);
                 return null;
+            }
 
+            TraceReport("RX", "FileStream.ReadAsync", "Success", buffer, bytesRead);
             if (bytesRead == buffer.Length)
                 return buffer;
 
@@ -238,17 +344,25 @@ public sealed class HidConnection : IDisposable
         }
         catch (OperationCanceledException)
         {
+            if (BetaDiagnostics.IsEnabled)
+                BetaDiagnostics.Write("HID.ReadCanceled", new { DevicePath });
             return null;
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
+            TraceReport("RX", "FileStream.ReadAsync", "Disposed", null, 0, ex);
             return null;
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            TraceReport("RX", "FileStream.ReadAsync", "Error", null, 0, ex);
             if (cancellationToken.IsCancellationRequested)
                 return null;
-
+            throw;
+        }
+        catch (Exception ex)
+        {
+            TraceReport("RX", "FileStream.ReadAsync", "Error", null, 0, ex);
             throw;
         }
     }
@@ -502,6 +616,8 @@ public sealed class HidConnection : IDisposable
 
     public void Close()
     {
+        if (DevicePath != null && BetaDiagnostics.IsEnabled)
+            BetaDiagnostics.Write("HID.Closed", new { DevicePath });
         _writeStream?.Dispose();
         _writeStream = null;
 
@@ -541,6 +657,11 @@ public sealed class HidConnection : IDisposable
         INVALID_HANDLE_VALUE = new(-1);
 
     private const int HIDP_STATUS_SUCCESS = 0x00110000;
+
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool HidD_SetOutputReport(
+        SafeFileHandle hidDeviceObject, byte[] reportBuffer, int reportBufferLength);
 
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.U1)]

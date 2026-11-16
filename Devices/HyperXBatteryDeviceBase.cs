@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice
+public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
 {
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(2);
 
@@ -14,12 +14,15 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     private readonly object _batteryRequestLock = new();
     private readonly object _chargeStatusRequestLock = new();
     private readonly object _microphoneMuteRequestLock = new();
+    private readonly object _autoPowerOffRequestLock = new();
+    private readonly SemaphoreSlim _autoPowerOffGate = new(1, 1);
 
     private CancellationTokenSource? _readerCancellation;
     private Task? _readerTask;
     private TaskCompletionSource<int>? _batteryRequest;
     private TaskCompletionSource<bool>? _chargeStatusRequest;
     private TaskCompletionSource<bool>? _microphoneMuteRequest;
+    private TaskCompletionSource<int>? _autoPowerOffRequest;
 
     private readonly object _reportRequestLock = new();
     private TaskCompletionSource<byte[]>? _reportRequest;
@@ -46,6 +49,20 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     // Opt-in per protocol; a continuous reader alone does not imply that a
     // headset sends unsolicited battery notifications.
     public virtual bool SupportsUnsolicitedBatteryNotifications => false;
+
+    public virtual bool SupportsAutoPowerOff => false;
+
+    protected virtual byte[]? CreateAutoPowerOffQueryCommand() => null;
+    protected virtual byte[]? CreateAutoPowerOffSetCommand(int minutes) => null;
+
+    protected virtual bool TryParseAutoPowerOffReport(byte[] report, out int minutes)
+    {
+        minutes = -1;
+        return false;
+    }
+
+    protected static bool IsAutoPowerOffValue(int minutes) =>
+        minutes is 0 or 10 or 20 or 30;
 
     public string Name => Definition.Name;
 
@@ -255,6 +272,106 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
             {
                 if (ReferenceEquals(_microphoneMuteRequest, response))
                     _microphoneMuteRequest = null;
+            }
+        }
+    }
+
+    public async Task<int?> QueryAutoPowerOffAsync(CancellationToken cancellationToken = default)
+    {
+        if (!SupportsAutoPowerOff || !IsConnected || !UsesContinuousReader)
+            return null;
+
+        await _autoPowerOffGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await QueryAutoPowerOffCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _autoPowerOffGate.Release();
+        }
+    }
+
+    public async Task<bool> SetAutoPowerOffAsync(int minutes,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsAutoPowerOffValue(minutes) || !SupportsAutoPowerOff || !IsConnected)
+            return false;
+
+        byte[]? command = CreateAutoPowerOffSetCommand(minutes);
+        if (command == null)
+            return false;
+
+        await _autoPowerOffGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!IsConnected)
+                return false;
+
+            HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.AutoPowerOff.WriteRequested", new
+            { Model = Name, Minutes = minutes });
+            Connection.WriteConfigurationReport(command);
+            // Only the final readback proves persistence; no blind retransmission.
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                await Task.Delay(attempt == 1 ? 250 : 350, cancellationToken).ConfigureAwait(false);
+                int? confirmed = await QueryAutoPowerOffCoreAsync(cancellationToken).ConfigureAwait(false);
+                HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.AutoPowerOff.WriteVerification", new
+                { Model = Name, RequestedMinutes = minutes, ActualMinutes = confirmed, Attempt = attempt });
+                if (confirmed == minutes) return true;
+            }
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.AutoPowerOff.WriteException", ex);
+            return false;
+        }
+        finally
+        {
+            _autoPowerOffGate.Release();
+        }
+    }
+
+    private async Task<int?> QueryAutoPowerOffCoreAsync(CancellationToken cancellationToken)
+    {
+        byte[]? command = CreateAutoPowerOffQueryCommand();
+        if (command == null || !IsConnected)
+            return null;
+
+        var pending = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_autoPowerOffRequestLock)
+        {
+            _autoPowerOffRequest = pending;
+        }
+        try
+        {
+            Connection.Write(command);
+            int? value = await WaitForResponseAsync(pending, cancellationToken)
+                .ConfigureAwait(false);
+            HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.AutoPowerOff.Read", new
+            { Model = Name, Minutes = value, Responded = value.HasValue });
+            return value;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            lock (_autoPowerOffRequestLock)
+            {
+                if (ReferenceEquals(_autoPowerOffRequest, pending))
+                    _autoPowerOffRequest = null;
             }
         }
     }
@@ -473,6 +590,13 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
                 }
             }
         }
+
+        if (TryParseAutoPowerOffReport(report, out int minutes) &&
+            IsAutoPowerOffValue(minutes))
+        {
+            lock (_autoPowerOffRequestLock)
+                _autoPowerOffRequest?.TrySetResult(minutes);
+        }
     }
 
     private async Task<int?> QueryBatteryDirectAsync(
@@ -665,6 +789,11 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
         {
             _microphoneMuteRequest?.TrySetCanceled();
             _microphoneMuteRequest = null;
+        }
+        lock (_autoPowerOffRequestLock)
+        {
+            _autoPowerOffRequest?.TrySetCanceled();
+            _autoPowerOffRequest = null;
         }
     }
 

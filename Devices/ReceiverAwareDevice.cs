@@ -9,7 +9,7 @@ namespace HyperXBatteryTray.Devices;
 /// endpoint is active at a time. Previously successful collections are tried
 /// first, but are never trusted without a fresh response after reconnection.
 /// </summary>
-internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice
+internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
 {
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
@@ -47,6 +47,30 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     public bool SupportsMicrophoneMuteMonitoring =>
         Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
         _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
+
+    public bool SupportsAutoPowerOff => _verified &&
+        Volatile.Read(ref _active) is IAutoPowerOffDevice { SupportsAutoPowerOff: true };
+
+    public async Task<int?> QueryAutoPowerOffAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_verified || Volatile.Read(ref _active) is not IAutoPowerOffDevice control ||
+            !control.SupportsAutoPowerOff)
+            return null;
+        IHyperXDevice? selected = Volatile.Read(ref _active);
+        int? result = await control.QueryAutoPowerOffAsync(cancellationToken).ConfigureAwait(false);
+        return _verified && ReferenceEquals(selected, Volatile.Read(ref _active)) ? result : null;
+    }
+
+    public async Task<bool> SetAutoPowerOffAsync(int minutes, CancellationToken cancellationToken = default)
+    {
+        if (!_verified || Volatile.Read(ref _active) is not IAutoPowerOffDevice control ||
+            !control.SupportsAutoPowerOff)
+            return false;
+        IHyperXDevice? selected = Volatile.Read(ref _active);
+        bool confirmed = await control.SetAutoPowerOffAsync(minutes, cancellationToken)
+            .ConfigureAwait(false);
+        return confirmed && _verified && ReferenceEquals(selected, Volatile.Read(ref _active));
+    }
 
     public bool SupportsUnsolicitedBatteryNotifications => _verified &&
         Volatile.Read(ref _active) is IBetaBatteryNotificationDevice notifications &&

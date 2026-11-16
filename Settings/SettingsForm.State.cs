@@ -49,6 +49,7 @@ public sealed partial class SettingsForm : Form
             _sidebarBatteryTitleLabel.Text = L("SidebarBattery");
         if (_sidebarMicrophoneTitleLabel != null)
             _sidebarMicrophoneTitleLabel.Text = L("SidebarMicrophone");
+        UpdateAutoPowerOffLanguage();
         if (_deviceSelector != null)
         {
             _deviceSelector.SetLanguage(_selectedLanguage);
@@ -183,6 +184,14 @@ public sealed partial class SettingsForm : Form
             _deviceSelector.DarkMode = dark;
             _deviceSelector.Invalidate();
         }
+
+        if (_autoPowerOffSelector != null)
+        {
+            _autoPowerOffSelector.DarkMode = dark;
+            _autoPowerOffSelector.Invalidate();
+        }
+        if (_autoPowerOffDescription != null)
+            _autoPowerOffDescription.ForeColor = secondary;
 
         if (_autoDetectButton != null)
         {
@@ -357,6 +366,7 @@ public sealed partial class SettingsForm : Form
         _pendingGradientPercent = defaults.GradientPercent;
         _selectedLanguage = defaults.Language;
         _selectedTheme = defaults.Theme;
+        RevertAutoPowerOffPending();
 
         if (_deviceSelector != null) _deviceSelector.SelectedIndex = 0;
         if (_languageComboBox != null) _languageComboBox.SelectedIndex = (int)_selectedLanguage;
@@ -370,12 +380,15 @@ public sealed partial class SettingsForm : Form
         RefreshDeviceStatus();
     }
 
-    private void OkButton_Click(object? sender, EventArgs e)
+    private async void OkButton_Click(object? sender, EventArgs e)
     {
-        if (ApplySettings()) Close();
+        if (await ApplySettingsAsync()) Close();
     }
 
-    private void ApplyButton_Click(object? sender, EventArgs e) => ApplySettings();
+    private async void ApplyButton_Click(object? sender, EventArgs e)
+    {
+        await ApplySettingsAsync();
+    }
 
     private static List<BatteryColorSettings> CloneBatteryColors(IEnumerable<BatteryColorSettings>? colors)
     {
@@ -390,8 +403,11 @@ public sealed partial class SettingsForm : Form
             .ToList();
     }
 
-    private bool ApplySettings()
+    private async Task<bool> ApplySettingsAsync()
     {
+        if (!await CommitAutoPowerOffAsync())
+            return false;
+
         _settings.SelectedDevice = _pendingSelectedDevice;
         _settings.UpdateChannel = _pendingUpdateChannel;
         _settings.UpdateChannelUserSelected = _pendingUpdateChannelUserSelected;
@@ -431,6 +447,7 @@ public sealed partial class SettingsForm : Form
 
     private void SettingsForm_FormClosed(object? sender, FormClosedEventArgs e)
     {
+        DisposeAutoPowerOffState();
         if (_updateCoordinator is not null)
             _updateCoordinator.Changed -= OnUpdateStatusChanged;
         StopDevicePreview();
@@ -531,10 +548,13 @@ public sealed partial class SettingsForm : Form
     {
         if (Owner != null)
         {
+            LimitWindowToWorkingArea();
             StartPosition = FormStartPosition.CenterParent;
             return;
         }
+        LimitWindowToWorkingArea();
         Rectangle workArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-        Location = new Point(workArea.Left + Math.Max(0, (workArea.Width - Width) / 2), workArea.Top + Math.Max(0, (workArea.Height - Height) / 2));
+        Location = new Point(workArea.Left + Math.Max(0, (workArea.Width - Width) / 2),
+            workArea.Top + Math.Max(0, (workArea.Height - Height) / 2));
     }
 }

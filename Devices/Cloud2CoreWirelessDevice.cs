@@ -35,6 +35,21 @@ public sealed class Cloud2CoreWirelessDevice : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    public override bool SupportsAutoPowerOff => true;
+    protected override byte[]? CreateAutoPowerOffQueryCommand() => new byte[] { 0x66, 0x85 };
+    protected override byte[]? CreateAutoPowerOffSetCommand(int minutes) =>
+        new byte[] { 0x66, 0x02, (byte)minutes };
+
+    protected override bool TryParseAutoPowerOffReport(byte[] report, out int minutes)
+    {
+        minutes = -1;
+        if (report.Length < 3 || report[0] != 0x66 || report[1] != 0x85)
+            return false;
+        minutes = report[2];
+        return IsAutoPowerOffValue(minutes);
+    }
+
+
     // The existing parser handles unsolicited battery reports independently
     // of replies to explicit queries. Experimental 60-second recovery in Beta.
     public override bool SupportsUnsolicitedBatteryNotifications => true;
