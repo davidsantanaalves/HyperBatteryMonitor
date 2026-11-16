@@ -21,6 +21,7 @@ public sealed partial class SettingsForm : Form
     private void DeviceSelector_SelectionChanged(object? sender, EventArgs e)
     {
         _pendingSelectedDevice = _deviceSelector.SelectedDeviceName;
+        InvalidateAutoPowerOffForDeviceChange();
         StartDevicePreviewForSelection();
         RefreshDeviceStatus();
     }
@@ -191,6 +192,7 @@ public sealed partial class SettingsForm : Form
 
         UpdateSidebarDeviceStatus(selected, connected);
         UpdateDeviceInformation();
+        RefreshAutoPowerOffState();
     }
 
     private void UpdateSidebarDeviceStatus(bool selected, bool connected)

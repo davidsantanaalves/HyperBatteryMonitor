@@ -43,6 +43,31 @@ public sealed class Cloud3SAlternateReceiverDevice : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    public override bool SupportsAutoPowerOff => true;
+    protected override byte[]? CreateAutoPowerOffQueryCommand() =>
+        new byte[] { 0x0C, 0x02, 0x03, 0x01, 0x00, 0x4B };
+    protected override byte[]? CreateAutoPowerOffSetCommand(int minutes)
+    {
+        int seconds = minutes * 60;
+        return new byte[] { 0x0C, 0x02, 0x03, 0x00, 0x00, 0x4A,
+            (byte)(seconds >> 8), (byte)seconds };
+    }
+
+    protected override bool TryParseAutoPowerOffReport(byte[] report, out int minutes)
+    {
+        minutes = -1;
+        if (report.Length < 8 || report[0] != 0x0C ||
+            report[1] != 0x02 || report[2] != 0x03 ||
+            report[5] != 0x4B || report[6] == 0xFF)
+            return false;
+        int seconds = (report[6] << 8) | report[7];
+        if (seconds is not (0 or 600 or 1200 or 1800))
+            return false;
+        minutes = seconds / 60;
+        return true;
+    }
+
+
     // The existing parser handles unsolicited battery reports independently
     // of replies to explicit queries. Experimental 60-second recovery in Beta.
     public override bool SupportsUnsolicitedBatteryNotifications => true;

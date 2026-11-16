@@ -15,9 +15,13 @@ public sealed partial class SettingsForm : Form
 {
     private const int PageHeaderLogicalHeight = 80;
     private const int PageHeaderBottomMarginLogical = 6;
-    private const int DeviceSelectorRowLogicalHeight = 148;
-    private const int DeviceConnectionRowLogicalHeight = 105;
-    private const int DeviceBatteryRowLogicalHeight = 94;
+    private const int DevicePageHeaderLogicalHeight = 66;
+    private const int DeviceSelectorRowLogicalHeight = 124;
+    private const int DeviceConnectionRowLogicalHeight = 92;
+    private const int DeviceBatteryRowLogicalHeight = 138;
+    private const int DeviceBatteryInfoRowLogicalHeight = 50;
+    private const int DeviceAutoPowerOffRowLogicalHeight = 46;
+    private const int DeviceCardBottomSpacingLogicalHeight = 4;
     private const int DeviceSectionHeaderLogicalHeight = 42;
     private const int StandardSectionHeaderLogicalHeight = 52;
     private const int NotificationToggleColumnLogicalWidth = 54;
@@ -132,13 +136,15 @@ public sealed partial class SettingsForm : Form
     {
         TableLayoutPanel page = BeginResponsivePage();
         AddPageHeader(page, "device", Glyph.Headphones, "Device", "DeviceDescription");
+        // Compact only the Device page; other pages retain their existing spacing.
+        page.RowStyles[0].Height = ScaleUi(DevicePageHeaderLogicalHeight);
 
         RoundedPanel selectorCard = CreateResponsiveCard(DeviceSelectorRowLogicalHeight);
-        AddResponsiveRow(selectorCard);
+        AddResponsiveRow(selectorCard, DeviceSelectorRowLogicalHeight, DeviceCardBottomSpacingLogicalHeight);
         BuildDeviceSelectorCard(selectorCard);
 
         RoundedPanel connectionCard = CreateResponsiveCard(DeviceConnectionRowLogicalHeight);
-        AddResponsiveRow(connectionCard);
+        AddResponsiveRow(connectionCard, DeviceConnectionRowLogicalHeight, DeviceCardBottomSpacingLogicalHeight);
         TableLayoutPanel connectionLayout = CreateSectionLayout(2, DeviceSectionHeaderLogicalHeight);
         connectionCard.Controls.Add(connectionLayout);
         AddDeviceSectionHeader(connectionLayout, "connection", "Connection", "ConnectionDescription");
@@ -151,7 +157,12 @@ public sealed partial class SettingsForm : Form
 
         RoundedPanel batteryCard = CreateResponsiveCard(DeviceBatteryRowLogicalHeight);
         AddResponsiveRow(batteryCard, DeviceBatteryRowLogicalHeight, 0);
-        TableLayoutPanel batteryLayout = CreateSectionLayout(2, DeviceSectionHeaderLogicalHeight);
+        TableLayoutPanel batteryLayout = CreateSectionLayout(3, DeviceSectionHeaderLogicalHeight);
+        batteryLayout.RowStyles[1].SizeType = SizeType.Absolute;
+        batteryLayout.RowStyles[1].Height = ScaleUi(DeviceBatteryInfoRowLogicalHeight);
+        // Fixed-height content row prevents the auto power-off selector from
+        // centering in an oversized proportional cell. All sizes are DPI-scaled.
+        batteryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(DeviceAutoPowerOffRowLogicalHeight)));
         batteryCard.Controls.Add(batteryLayout);
         AddDeviceSectionHeader(batteryLayout, "battery", "Battery", "BatteryDescription");
         AddDeviceInfoColumnsResponsive(batteryLayout, new[]
@@ -159,6 +170,7 @@ public sealed partial class SettingsForm : Form
             ("clock", "BatteryLife", "Cloud3Wireless_Battery"),
             ("energy", "ChargeTime", "Cloud3Wireless_ChargeTime")
         });
+        BuildAutoPowerOffRow(batteryLayout);
 
         UpdateDeviceCapabilities();
     }
@@ -824,6 +836,8 @@ public sealed partial class SettingsForm : Form
     {
         _currentPage = key;
         _languageComboBox?.ClosePopup();
+        _autoPowerOffSelector?.ClosePopup();
+        _autoPowerOffSelector = null;
         foreach ((string name, SidebarItem item) in _navButtons)
             item.Selected = name == key;
 

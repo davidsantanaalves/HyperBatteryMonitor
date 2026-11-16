@@ -39,6 +39,23 @@ public sealed class CloudStinger2WirelessDevice : HyperXBatteryDeviceBase
 
     protected override bool UsesContinuousReader => true;
 
+    public override bool SupportsAutoPowerOff => true;
+    protected override byte[]? CreateAutoPowerOffQueryCommand() =>
+        new byte[] { 0x06, 0xFF, 0xBB, 0x07 };
+    protected override byte[]? CreateAutoPowerOffSetCommand(int minutes) =>
+        new byte[] { 0x06, 0xFF, 0xBB, 0x22, (byte)minutes };
+
+    protected override bool TryParseAutoPowerOffReport(byte[] report, out int minutes)
+    {
+        minutes = -1;
+        if (report.Length < 5 || report[0] != 0x06 ||
+            report[1] != 0xFF || report[2] != 0xBB || report[3] != 0x07)
+            return false;
+        minutes = report[4];
+        return IsAutoPowerOffValue(minutes);
+    }
+
+
     protected override byte[]? CreateChargeStatusCommand() =>
         CreateCommand(ChargeCommandBytes);
 

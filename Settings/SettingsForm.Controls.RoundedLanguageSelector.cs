@@ -19,6 +19,14 @@ public sealed partial class SettingsForm : Form
         private ThemedVerticalScrollBar? _popupScrollBar;
         private LanguagePopupMessageFilter? _popupMessageFilter;
         private int _selectedIndex = -1;
+        private string _placeholderText = string.Empty;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string PlaceholderText
+        {
+            get => _placeholderText;
+            set { _placeholderText = value ?? string.Empty; Invalidate(); }
+        }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool DarkMode
@@ -84,7 +92,9 @@ public sealed partial class SettingsForm : Form
             e.Graphics.FillPath(backgroundBrush, path);
             e.Graphics.DrawPath(borderPen, path);
 
-            string text = SelectedItem ?? string.Empty;
+            string text = SelectedItem ?? _placeholderText;
+            if (!Enabled)
+                foreground = _darkMode ? Color.FromArgb(150, 155, 162) : Color.FromArgb(135, 145, 157);
             int textLeft = ScaleLogical(11);
             int reservedRight = ScaleLogical(43);
             Rectangle textBounds = new(textLeft, 1, Math.Max(1, Width - reservedRight), Math.Max(1, Height - 2));
@@ -108,6 +118,12 @@ public sealed partial class SettingsForm : Form
 
         private int ScaleLogical(int logicalValue) =>
             PngIconCache.ScaleLogicalToInt(logicalValue, DeviceDpi);
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            Invalidate();
+        }
 
         protected override void OnClick(EventArgs e)
         {

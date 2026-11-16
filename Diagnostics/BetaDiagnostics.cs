@@ -7,7 +7,7 @@ namespace HyperXBatteryTray.Diagnostics;
 /// <summary>Opt-in, local-only, bounded diagnostics for compiled Beta releases.</summary>
 internal static class BetaDiagnostics
 {
-    internal const int ConsentVersion = 2;
+    internal const int ConsentVersion = 3;
     private const long MaxFileBytes = 10L * 1024 * 1024;
     private const long MaxDirectoryBytes = 100L * 1024 * 1024;
     private const int RetentionDays = 14;
@@ -15,6 +15,9 @@ internal static class BetaDiagnostics
     private static Channel<string>? _channel;
     private static Task? _worker;
     private static string? _folder;
+    private static long _droppedEntries;
+
+    internal static bool IsEnabled => Volatile.Read(ref _channel) != null;
 
     internal static string LogsFolder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HBM Logs");
@@ -32,7 +35,8 @@ internal static class BetaDiagnostics
                 Prune(_folder);
                 _channel = Channel.CreateBounded<string>(new BoundedChannelOptions(4096)
                 {
-                    FullMode = BoundedChannelFullMode.DropOldest,
+                    // Never silently evict an earlier HID report. Count saturation instead.
+                    FullMode = BoundedChannelFullMode.Wait,
                     SingleReader = true,
                     SingleWriter = false
                 });
@@ -61,7 +65,20 @@ internal static class BetaDiagnostics
                 Event = eventName,
                 Details = details
             });
-            channel.Writer.TryWrite(entry);
+            long dropped = Interlocked.Exchange(ref _droppedEntries, 0);
+            if (dropped > 0)
+            {
+                string notice = JsonSerializer.Serialize(new
+                {
+                    TimestampUtc = DateTimeOffset.UtcNow,
+                    Event = "Diagnostics.EntriesDropped",
+                    Details = new { Count = dropped, Reason = "Queue capacity exceeded" }
+                });
+                if (!channel.Writer.TryWrite(notice))
+                    Interlocked.Add(ref _droppedEntries, dropped);
+            }
+            if (!channel.Writer.TryWrite(entry))
+                Interlocked.Increment(ref _droppedEntries);
         }
         catch { /* Logging must never interrupt HID or UI work. */ }
     }
