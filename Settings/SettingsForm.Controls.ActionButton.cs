@@ -23,6 +23,7 @@ public sealed partial class SettingsForm : Form
         private string? _iconKey;
         private int _iconLogicalSize = 20;
         private bool _iconOnly;
+        private bool _tealAccent;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool ShowResetIcon { get => _showResetIcon; set { _showResetIcon = value; Invalidate(); } }
@@ -32,6 +33,10 @@ public sealed partial class SettingsForm : Form
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Primary { get => _primary; set { _primary = value; Invalidate(); } }
+
+        // Used by the About > Diagnostics action in both Light and Dark themes.
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool TealAccent { get => _tealAccent; set { _tealAccent = value; Invalidate(); } }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string? IconKey { get => _iconKey; set { _iconKey = value; Invalidate(); } }
@@ -84,7 +89,13 @@ public sealed partial class SettingsForm : Form
             if (_pressed)
                 fill = _primary ? Color.FromArgb(0, 105, 220) : (_dark ? Color.FromArgb(32, 36, 40) : Color.FromArgb(239, 243, 248));
 
-            Color border = _dark ? Color.FromArgb(82, 88, 95) : Color.FromArgb(198, 205, 214);
+            // A single opt-in accent; other ActionButtons retain their existing palette.
+            if (_tealAccent)
+                fill = _pressed ? Color.FromArgb(9, 91, 107) :
+                    _hover ? Color.FromArgb(13, 122, 143) : Color.FromArgb(11, 114, 133);
+
+            Color border = _tealAccent ? Color.FromArgb(41, 145, 164) :
+                (_dark ? Color.FromArgb(82, 88, 95) : Color.FromArgb(198, 205, 214));
             RectangleF rect = new(1f, 1f, Math.Max(1f, Width - 2f), Math.Max(1f, Height - 2f));
             using GraphicsPath path = GraphicsExtensions.CreateRoundedPath(rect, 7);
             using Brush brush = new SolidBrush(fill);
@@ -117,14 +128,14 @@ public sealed partial class SettingsForm : Form
                     e.Graphics,
                     iconKey,
                     new RectangleF(iconLeft, iconTop, iconSize, iconSize),
-                    _dark,
+                    _tealAccent || _dark, // White Dark-theme glyph stays legible on teal in Light mode.
                     DeviceDpi);
             }
 
             if (!_iconOnly)
             {
                 TextRenderer.DrawText(e.Graphics, Text, Font, textRect,
-                    _primary ? Color.White : (_dark ? Color.WhiteSmoke : LightText),
+                    (_tealAccent || _primary) ? Color.White : (_dark ? Color.WhiteSmoke : LightText),
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
         }

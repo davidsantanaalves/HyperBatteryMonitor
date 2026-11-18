@@ -134,6 +134,12 @@ internal sealed class PngIconCache : IDisposable
         if (File.Exists(themePrefixPath))
             return themePrefixPath;
 
+        // New Beta 3 theme assets are named diagnostics-25x25.png and
+        // install-25x25.png inside Dark/Light, without a theme suffix.
+        string bareThemePath = Path.Combine(directory, $"{iconKey}-{sizePx}x{sizePx}.png");
+        if (File.Exists(bareThemePath))
+            return bareThemePath;
+
         string sharedPath = Path.Combine(
             AssetPaths.CommonIconsDirectory,
             $"{iconKey}-{sizePx}x{sizePx}.png");
@@ -176,7 +182,7 @@ internal sealed class PngIconCache : IDisposable
         CollectAssetSizes(
             sizes,
             themeDirectory,
-            new[] { $"{iconKey}-{suffix}-", $"{suffix}_{iconKey}-" });
+            new[] { $"{iconKey}-{suffix}-", $"{suffix}_{iconKey}-", $"{iconKey}-" });
         CollectAssetSizes(
             sizes,
             sharedDirectory,

@@ -10,7 +10,7 @@
     <Version>2.5.0</Version>
     <!-- Single source of truth for build channel and Beta sequence. -->
     <ReleaseChannel>Beta</ReleaseChannel>
-    <BetaNumber>2</BetaNumber>
+    <BetaNumber>3</BetaNumber>
     <InformationalVersion Condition="'$(ReleaseChannel)' == 'Stable'">$(Version)</InformationalVersion>
     <InformationalVersion Condition="'$(ReleaseChannel)' == 'Beta'">$(Version)-beta.$(BetaNumber)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
