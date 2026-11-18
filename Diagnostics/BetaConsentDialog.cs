@@ -6,7 +6,7 @@ using HyperXBatteryTray.Settings;
 
 namespace HyperXBatteryTray.Diagnostics;
 
-/// <summary>Explicit, localized opt-in shown only by compiled Beta builds.</summary>
+/// <summary>Optional, localized diagnostics consent for Stable and Beta builds.</summary>
 internal sealed class BetaConsentDialog : Form
 {
     private const int DwmwaUseImmersiveDarkMode = 20;
@@ -14,7 +14,7 @@ internal sealed class BetaConsentDialog : Form
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    internal BetaConsentDialog(AppLanguage language, AppTheme theme)
+    internal BetaConsentDialog(AppLanguage language, AppTheme theme, bool reviewOnly = false)
     {
         string T(string key) => Localization.Get(key, language);
         bool dark = IsDarkTheme(theme);
@@ -68,7 +68,17 @@ internal sealed class BetaConsentDialog : Form
             BackColor = background, ForeColor = foreground,
             Margin = new Padding(0)
         };
-        layout.Controls.Add(description, 0, 1);
+        // Match the themed scrollbar already used in UpdateReleaseNotesDialog.
+        // The overlay must share a normal Panel with the RichTextBox, not the TableLayoutPanel.
+        Panel descriptionHost = new()
+        {
+            Dock = DockStyle.Fill,
+            BackColor = background,
+            Margin = new Padding(0)
+        };
+        descriptionHost.Controls.Add(description);
+        layout.Controls.Add(descriptionHost, 0, 1);
+        ThemedVerticalScrollBar descriptionScrollBar = new(description, dark);
 
         FlowLayoutPanel buttons = new()
         {
@@ -97,20 +107,27 @@ internal sealed class BetaConsentDialog : Form
             return button;
         }
 
-        Button agree = CreateButton(T("BetaDiagnosticsAccept"), "✓", DialogResult.OK, true);
-        Button decline = CreateButton(T("BetaDiagnosticsDecline"), "✕", DialogResult.Cancel, false);
-        buttons.Controls.Add(agree);
-        buttons.Controls.Add(decline);
+        // Reviewing previously accepted terms is informational only: it must
+        // never expose opt-in/opt-out actions or alter persisted consent.
+        Button? agree = reviewOnly ? null :
+            CreateButton(T("BetaDiagnosticsAccept"), "✓", DialogResult.OK, true);
+        Button dismiss = reviewOnly
+            ? CreateButton(T("BetaDiagnosticsClose"), "✕", DialogResult.Cancel, true)
+            : CreateButton(T("BetaDiagnosticsDecline"), "✕", DialogResult.Cancel, false);
+        if (agree is not null)
+            buttons.Controls.Add(agree);
+        buttons.Controls.Add(dismiss);
         layout.Controls.Add(buttons, 0, 2);
 
         // If a localization needs more width, expand the dialog before display.
-        int requiredClientWidth = layout.Padding.Horizontal + agree.Width + decline.Width +
-            agree.Margin.Horizontal + decline.Margin.Horizontal + buttons.Padding.Horizontal;
+        int requiredClientWidth = layout.Padding.Horizontal + dismiss.Width +
+            dismiss.Margin.Horizontal + buttons.Padding.Horizontal +
+            (agree is null ? 0 : agree.Width + agree.Margin.Horizontal);
         if (ClientSize.Width < requiredClientWidth)
             ClientSize = new Size(requiredClientWidth, ClientSize.Height);
 
-        AcceptButton = agree;
-        CancelButton = decline;
+        AcceptButton = agree ?? dismiss;
+        CancelButton = dismiss;
         Shown += (_, _) =>
         {
             // When opened from About, center over Settings; startup remains screen-centered.
@@ -131,7 +148,8 @@ internal sealed class BetaConsentDialog : Form
             description.SelectionStart = 0;
             description.SelectionLength = 0;
             description.ScrollToCaret();
-            agree.Focus();
+            descriptionScrollBar.RefreshState();
+            (agree ?? dismiss).Focus();
         };
     }
 

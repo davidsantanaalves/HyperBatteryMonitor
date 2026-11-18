@@ -197,7 +197,7 @@ public sealed partial class SettingsForm : Form
                 ? "supported"
                 : "unsupported";
         _microphoneCapabilityIcon.IconKey =
-            selected && !usingBluetooth && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(selectedDevice)
+            selected && !usingBluetooth && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(selectedDevice, _device)
                 ? "supported"
                 : "unsupported";
     }

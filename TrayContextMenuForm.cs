@@ -271,7 +271,7 @@ internal sealed class TrayContextMenuForm : Form
             _batteryText.Text = Localization.Get("BatteryNA", _settings.Language);
         }
         bool microphoneMonitoringSupported =
-            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized);
+            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized, _device);
         bool microphoneStatusAvailable =
             connected &&
             microphoneMonitoringSupported &&
@@ -316,7 +316,7 @@ internal sealed class TrayContextMenuForm : Form
         bool selected = !string.IsNullOrWhiteSpace(_settings.SelectedDevice);
         string normalized = NormalizeDeviceName(_settings.SelectedDevice);
         bool microphoneMonitoringSupported =
-            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized);
+            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized, _device);
         bool microphoneMuted =
             _device?.IsConnected == true &&
             _device.Battery >= 0 &&

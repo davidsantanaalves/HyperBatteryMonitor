@@ -25,6 +25,8 @@ public sealed class BatteryMonitor : IDisposable
         _device.BatteryChanged += Device_BatteryChanged;
         _device.ChargingChanged += Device_ChargingChanged;
         _device.MicrophoneMuteChanged += Device_MicrophoneMuteChanged;
+        if (_device is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated += Device_MicrophoneMuteStateInvalidated;
         if (_device is IEventDrivenHidDevice events)
             events.PhysicalConnectionChanged += Device_PhysicalConnectionChanged;
     }
@@ -38,6 +40,7 @@ public sealed class BatteryMonitor : IDisposable
     public event EventHandler<bool>? ChargingChanged;
 
     public event EventHandler<bool>? MicrophoneMuteChanged;
+    public event EventHandler? MicrophoneMuteStateInvalidated;
 
     public void Start()
     {
@@ -222,6 +225,13 @@ public sealed class BatteryMonitor : IDisposable
         UpdateMicrophoneMuteState(muted);
     }
 
+    private void Device_MicrophoneMuteStateInvalidated(object? sender, EventArgs e)
+    {
+        _microphoneStateInitialized = false;
+        _lastMicrophoneMuteState = null;
+        MicrophoneMuteStateInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
     private void UpdateBatteryState(int battery)
     {
         if (_lastBattery == battery)
@@ -273,6 +283,8 @@ public sealed class BatteryMonitor : IDisposable
         _device.BatteryChanged -= Device_BatteryChanged;
         _device.ChargingChanged -= Device_ChargingChanged;
         _device.MicrophoneMuteChanged -= Device_MicrophoneMuteChanged;
+        if (_device is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated -= Device_MicrophoneMuteStateInvalidated;
         if (_device is IEventDrivenHidDevice events)
             events.PhysicalConnectionChanged -= Device_PhysicalConnectionChanged;
 

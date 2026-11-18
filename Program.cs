@@ -55,54 +55,51 @@ internal static class Program
 
         ApplicationConfiguration.Initialize();
 
-        // Optional diagnostics: declining consent must never block Beta usage.
+        // Optional diagnostics are available on Stable and Beta; refusal never blocks app usage.
         // A negative consent version records an explicit opt-out; zero means
         // the user has not yet made a decision for the current consent text.
-        if (AppReleaseInfo.IsBeta)
+        AppSettings preferences = settingsManager.Load();
+        if (preferences.BetaDiagnosticsConsentVersion != BetaDiagnostics.ConsentVersion &&
+            preferences.BetaDiagnosticsConsentVersion != -BetaDiagnostics.ConsentVersion)
         {
-            AppSettings preferences = settingsManager.Load();
-            if (preferences.BetaDiagnosticsConsentVersion != BetaDiagnostics.ConsentVersion &&
-                preferences.BetaDiagnosticsConsentVersion != -BetaDiagnostics.ConsentVersion)
+            using BetaConsentDialog consent = new(preferences.Language, preferences.Theme);
+            preferences.BetaDiagnosticsConsentVersion = consent.ShowDialog() == DialogResult.OK
+                ? BetaDiagnostics.ConsentVersion : -BetaDiagnostics.ConsentVersion;
+            try
             {
-                using BetaConsentDialog consent = new(preferences.Language, preferences.Theme);
-                preferences.BetaDiagnosticsConsentVersion = consent.ShowDialog() == DialogResult.OK
-                    ? BetaDiagnostics.ConsentVersion : -BetaDiagnostics.ConsentVersion;
-                try
-                {
-                    settingsManager.Save(preferences);
-                }
-                catch
-                {
-                    // Failed persistence cannot authorize diagnostics. Continue
-                    // running without logging; consent can be granted from About.
-                    preferences.BetaDiagnosticsConsentVersion = 0;
-                    MessageBox.Show(
-                        Localization.Get("BetaDiagnosticsConsentSaveError", preferences.Language),
-                        Localization.Get("BetaDiagnosticsConsentTitle", preferences.Language),
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                settingsManager.Save(preferences);
             }
-
-            if (preferences.BetaDiagnosticsConsentVersion == BetaDiagnostics.ConsentVersion)
+            catch
             {
-                BetaDiagnostics.Start();
-                BetaDiagnostics.Write("Application.Started", new
-                {
-                    Version = AppReleaseInfo.SemanticVersion,
-                    Windows = Environment.OSVersion.VersionString,
-                    Runtime = Environment.Version.ToString(),
-                    Architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString()
-                });
+                // Failed persistence cannot authorize diagnostics. Continue
+                // running without logging; consent can be granted from About.
+                preferences.BetaDiagnosticsConsentVersion = 0;
+                MessageBox.Show(
+                    Localization.Get("BetaDiagnosticsConsentSaveError", preferences.Language),
+                    Localization.Get("BetaDiagnosticsConsentTitle", preferences.Language),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
-
-            // Register once even when diagnostics is initially declined, so
-            // later opt-in from About also captures subsequent exceptions.
-            Application.ThreadException += (_, e) => BetaDiagnostics.WriteError("UI.UnhandledException", e.Exception);
-            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
-                BetaDiagnostics.WriteError("Process.UnhandledException", e.ExceptionObject as Exception);
-            TaskScheduler.UnobservedTaskException += (_, e) =>
-                BetaDiagnostics.WriteError("Task.UnobservedException", e.Exception);
         }
+
+        if (preferences.BetaDiagnosticsConsentVersion == BetaDiagnostics.ConsentVersion)
+        {
+            BetaDiagnostics.Start();
+            BetaDiagnostics.Write("Application.Started", new
+            {
+                Version = AppReleaseInfo.SemanticVersion,
+                Windows = Environment.OSVersion.VersionString,
+                Runtime = Environment.Version.ToString(),
+                Architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString()
+            });
+        }
+
+        // Register once even when diagnostics is initially declined, so
+        // later opt-in from About also captures subsequent exceptions.
+        Application.ThreadException += (_, e) => BetaDiagnostics.WriteError("UI.UnhandledException", e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            BetaDiagnostics.WriteError("Process.UnhandledException", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+            BetaDiagnostics.WriteError("Task.UnobservedException", e.Exception);
 
         try
         {

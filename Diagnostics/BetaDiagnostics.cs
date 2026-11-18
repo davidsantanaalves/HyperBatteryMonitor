@@ -4,10 +4,10 @@ using System.Threading.Channels;
 
 namespace HyperXBatteryTray.Diagnostics;
 
-/// <summary>Opt-in, local-only, bounded diagnostics for compiled Beta releases.</summary>
+/// <summary>Opt-in, local-only, bounded diagnostics for Stable and Beta releases.</summary>
 internal static class BetaDiagnostics
 {
-    internal const int ConsentVersion = 3;
+    internal const int ConsentVersion = 4;
     private const long MaxFileBytes = 10L * 1024 * 1024;
     private const long MaxDirectoryBytes = 100L * 1024 * 1024;
     private const int RetentionDays = 14;
@@ -24,7 +24,6 @@ internal static class BetaDiagnostics
 
     internal static void Start()
     {
-        if (!AppReleaseInfo.IsBeta) return;
         lock (Gate)
         {
             if (_channel != null) return;
@@ -46,7 +45,7 @@ internal static class BetaDiagnostics
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Local beta diagnostics unavailable: {ex.GetType().Name}");
+                Debug.WriteLine($"Local diagnostics unavailable: {ex.GetType().Name}");
                 _channel = null;
             }
         }
@@ -54,7 +53,6 @@ internal static class BetaDiagnostics
 
     internal static void Write(string eventName, object? details = null)
     {
-        if (!AppReleaseInfo.IsBeta) return;
         Channel<string>? channel = Volatile.Read(ref _channel);
         if (channel == null) return;
         try
@@ -115,7 +113,7 @@ internal static class BetaDiagnostics
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Beta diagnostics write failed: {ex.GetType().Name}");
+                    Debug.WriteLine($"Diagnostics write failed: {ex.GetType().Name}");
                 }
             }
         }

@@ -115,6 +115,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _batteryMonitor.ConnectionChanged += BatteryMonitor_ConnectionChanged;
         _batteryMonitor.ChargingChanged += BatteryMonitor_ChargingChanged;
         _batteryMonitor.MicrophoneMuteChanged += BatteryMonitor_MicrophoneMuteChanged;
+        _batteryMonitor.MicrophoneMuteStateInvalidated += BatteryMonitor_MicrophoneMuteStateInvalidated;
     }
 
     private void DisposeDeviceMonitor()
@@ -125,6 +126,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             _batteryMonitor.ConnectionChanged -= BatteryMonitor_ConnectionChanged;
             _batteryMonitor.ChargingChanged -= BatteryMonitor_ChargingChanged;
             _batteryMonitor.MicrophoneMuteChanged -= BatteryMonitor_MicrophoneMuteChanged;
+            _batteryMonitor.MicrophoneMuteStateInvalidated -= BatteryMonitor_MicrophoneMuteStateInvalidated;
             _batteryMonitor.Dispose();
             _batteryMonitor = null;
         }
@@ -408,6 +410,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         }
 
         _settingsForm?.SetCharging(_isCharging);
+        if ((_blinkTimer != null) != ShouldRunBlinkTimer())
+            RestartBlinkTimer();
         UpdateTrayIcon();
         UpdateTray();
         _trayMenu?.UpdateDevice(
@@ -453,6 +457,27 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
         UpdateTrayIcon();
         UpdateTray();
+    }
+
+    private void BatteryMonitor_MicrophoneMuteStateInvalidated(object? sender, EventArgs e)
+    {
+        if (_toastActivationDispatcher.IsDisposed || !_toastActivationDispatcher.IsHandleCreated)
+            return;
+        try
+        {
+            _toastActivationDispatcher.BeginInvoke((MethodInvoker)(() =>
+            {
+                if (!ReferenceEquals(sender, _batteryMonitor)) return;
+                // Read current state: a fresh packet may have arrived since the
+                // invalidation was queued on the UI thread.
+                _isMicrophoneMuted = _device is { IsMicrophoneMuteStateKnown: true, IsMicrophoneMuted: true };
+                _blinkState = false;
+                UpdateTrayIcon();
+                UpdateTray();
+                _trayMenu?.UpdateDevice(_device, _isCharging, GetCurrentBatteryRemainingTime());
+            }));
+        }
+        catch (InvalidOperationException) { } // UI is shutting down.
     }
 
     private void UpdateTray()
@@ -557,6 +582,11 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private static string NormalizeDeviceName(string value) =>
         HyperXDeviceManager.NormalizeSupportedDeviceName(value);
 
+    private bool ShouldRunBlinkTimer() =>
+        _settings.BlinkOnCriticalBattery ||
+        (_settings.ShowMicrophoneMuteInSystray &&
+            _device?.SupportsMicrophoneMuteMonitoring == true);
+
     private void RestartBlinkTimer()
     {
         _blinkTimer?.Stop();
@@ -564,12 +594,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _blinkTimer = null;
         _blinkState = false;
 
-        bool microphoneMuteBlinkSupported =
-            _settings.ShowMicrophoneMuteInSystray &&
-            _device?.SupportsMicrophoneMuteMonitoring == true;
-
-        if (!_settings.BlinkOnCriticalBattery &&
-            !microphoneMuteBlinkSupported)
+        if (!ShouldRunBlinkTimer())
             return;
 
         _blinkTimer = new System.Windows.Forms.Timer { Interval = 600 };
@@ -735,6 +760,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _settings.ShowMicrophoneMuteInSystray &&
         _isMicrophoneMuted &&
         _device?.IsConnected == true &&
+        _device.IsMicrophoneMuteStateKnown &&
         _device.SupportsMicrophoneMuteMonitoring;
 
     private Icon CreateMicrophoneMuteIcon() =>

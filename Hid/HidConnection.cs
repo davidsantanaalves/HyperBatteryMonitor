@@ -454,6 +454,53 @@ public sealed class HidConnection : IDisposable
     private static string? FindDevicePath(Func<string, bool> matches) =>
         EnumerateDevicePaths(matches).FirstOrDefault();
 
+    // Input-only collections cannot use Open(), which requires an output report.
+    // Match the PnP parent so a second receiver can never supply this one's events.
+    internal static FileStream? OpenSiblingInputStream(string devicePath,
+        string interfacePattern, ushort usagePage, ushort usage, ushort reportLength)
+    {
+        uint? parent = GetHidParent(devicePath);
+        if (parent == null) return null;
+        var paths = EnumerateDevicePaths(path =>
+            path.Contains(interfacePattern, StringComparison.OrdinalIgnoreCase) &&
+            GetHidParent(path) == parent);
+        if (paths.Count != 1) return null;
+
+        SafeFileHandle handle = CreateFile(paths[0], GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
+            0x40000000 /* FILE_FLAG_OVERLAPPED */, IntPtr.Zero);
+        try
+        {
+            if (handle.IsInvalid) return null;
+            HidCapabilities? caps = GetHidCapabilities(handle);
+            if (caps == null || caps.Value.UsagePage != usagePage ||
+                caps.Value.Usage != usage || caps.Value.InputReportByteLength != reportLength)
+                return null;
+            var stream = new FileStream(handle, FileAccess.Read, reportLength, isAsync: true);
+            handle = null!; // Ownership transferred to the stream.
+            return stream;
+        }
+        finally { handle?.Dispose(); }
+    }
+
+    private static uint? GetHidParent(string path)
+    {
+        string[] parts = path.Split('#');
+        if (parts.Length != 4 || !parts[0].EndsWith("hid", StringComparison.OrdinalIgnoreCase))
+            return null;
+        string instanceId = $"HID\\{parts[1]}\\{parts[2]}";
+        if (CM_Locate_DevNode(out uint node, instanceId, 0) != 0 ||
+            CM_Get_Parent(out uint parent, node, 0) != 0)
+            return null;
+        return parent;
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, EntryPoint = "CM_Locate_DevNodeW")]
+    private static extern uint CM_Locate_DevNode(out uint node, string deviceId, uint flags);
+
+    [DllImport("cfgmgr32.dll")]
+    private static extern uint CM_Get_Parent(out uint parent, uint node, uint flags);
+
     private static IReadOnlyList<string> EnumerateDevicePaths(Func<string, bool> matches)
     {
         List<string> paths = new();
