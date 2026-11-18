@@ -40,6 +40,8 @@ internal static class Program
             ("late read cannot mutate reconnected session or duplicate readers", StaleRead),
             ("disconnect during open rejects and disposes late stream", StaleOpen),
             ("unknown-state subscriber exception is observed", SubscriberFailure),
+            ("blocked invalidation preserves battery, cleanup and event order", SlowInvalidation),
+            ("disconnect during invalidation drops remaining old session delivery", StaleInvalidation),
             ("EOF disposal cannot block battery or charging", () => SlowCleanup(false, false)),
             ("disconnect disposal cannot block reconnect or battery", () => SlowCleanup(true, false)),
             ("blocking cancellation cannot block reconnect or battery", () => SlowCleanup(true, true)),
@@ -55,6 +57,88 @@ internal static class Program
             Console.WriteLine("PASS " + test.Name);
         }
         Console.WriteLine($"All {tests.Length} regression scenarios passed.");
+    }
+
+    private static async Task SlowInvalidation()
+    {
+        var disposalStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = new PacketStream { BeforeDispose = () => disposalStarted.TrySetResult() };
+        var next = new PacketStream();
+        HidConnection.OpenMicrophone = _ => HidConnection.MicrophoneOpens == 1 ? first : next;
+        HidConnection.BatteryReply = _ => HidConnection.BatteryPacket(charge: 5);
+        using var driver = Dts();
+        using var release = new ManualResetEventSlim();
+        var invalidated = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var events = new ConcurrentQueue<string>();
+        driver.MicrophoneMuteChanged += (_, muted) => events.Enqueue(muted ? "muted" : "open");
+        driver.MicrophoneMuteStateInvalidated += (_, _) =>
+        {
+            events.Enqueue("unknown");
+            invalidated.TrySetResult(Monitor.IsEntered(Field<object>(driver, "_featureLock")!));
+            release.Wait(Timeout + Timeout);
+        };
+
+        Check(driver.Connect() && await driver.QueryBatteryAsync() is >= 0, "initial battery sample");
+        await first.Reading.Task.WaitAsync(Timeout);
+        first.Packet(0x65, 0x04);
+        await Until(() => events.Count == 1);
+        Task reader = Reader(driver);
+        first.Packet(); // EOF
+
+        try
+        {
+            Check(!await invalidated.Task.WaitAsync(Timeout), "external callback owns _featureLock");
+            Task<int?> battery = Task.Run(() => driver.QueryBatteryAsync());
+            Task<bool?> charge = Task.Run(() => driver.QueryChargeStatusAsync());
+            Check(await battery.WaitAsync(Timeout) is >= 0, "battery stalled during invalidation");
+            Check(await charge.WaitAsync(Timeout) == true, "charging stalled during invalidation");
+            await disposalStarted.Task.WaitAsync(Timeout);
+            Check(!driver.IsMicrophoneMuteStateKnown && !reader.IsCompleted &&
+                HidConnection.MicrophoneOpens == 1 && HidConnection.Commands.Count == 4,
+                "reader, mute state or HID traffic changed while subscriber was blocked");
+        }
+        finally
+        {
+            release.Set();
+            await reader.WaitAsync(Timeout);
+        }
+
+        AllowRetry(driver);
+        Check(await driver.QueryBatteryAsync() is >= 0, "battery after cleanup");
+        await next.Reading.Task.WaitAsync(Timeout);
+        next.Packet(0x65, 0x04);
+        await Until(() => events.Count == 3);
+        Check(events.SequenceEqual(["muted", "unknown", "muted"]) &&
+            HidConnection.Commands.Count == 6 && first.DisposeCount == 1,
+            "mute publication order, stream ownership or HID traffic changed");
+        Task recoveredReader = Reader(driver);
+        driver.Disconnect();
+        await recoveredReader.WaitAsync(Timeout);
+    }
+
+    private static async Task StaleInvalidation()
+    {
+        var stream = new PacketStream();
+        HidConnection.OpenMicrophone = _ => stream;
+        using var driver = Dts();
+        bool reconnected = false;
+        int laterDeliveries = 0;
+        driver.MicrophoneMuteStateInvalidated += (_, _) =>
+        {
+            driver.Disconnect();
+            reconnected = driver.Connect();
+        };
+        driver.MicrophoneMuteStateInvalidated += (_, _) => laterDeliveries++;
+
+        Check(driver.Connect() && await driver.QueryBatteryAsync() is >= 0, "initial battery sample");
+        await stream.Reading.Task.WaitAsync(Timeout);
+        stream.Packet(0x65, 0x04);
+        await Until(() => driver.IsMicrophoneMuteStateKnown);
+        Task reader = Reader(driver);
+        stream.Packet();
+        await reader.WaitAsync(Timeout);
+        Check(reconnected && driver.IsConnected && !driver.IsMicrophoneMuteStateKnown &&
+            laterDeliveries == 0 && stream.DisposeCount == 1, "old session invalidation reached the new session");
     }
 
     private static Task Parsing()

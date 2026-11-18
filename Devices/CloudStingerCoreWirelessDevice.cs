@@ -253,6 +253,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
         }
         finally
         {
+            bool notifyInvalidation = false;
             Task cleanup;
             lock (_featureLock)
             {
@@ -265,11 +266,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
                     if (current)
                     {
                         _microphoneRetryAfter = Environment.TickCount64 + MicrophoneRetryMilliseconds;
-                        if (ResetMicrophoneMuteState())
-                        {
-                            try { MicrophoneMuteStateInvalidated?.Invoke(this, EventArgs.Empty); }
-                            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
-                        }
+                        notifyInvalidation = ResetMicrophoneMuteState();
                     }
                 }
                 cleanup = BeginMicrophoneCleanup(cancellation);
@@ -277,10 +274,39 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
             // A stream opened after Disconnect was never published, so only
             // this worker owns it. Published streams belong to cleanup.
             if (!published) DisposeMicrophoneStream(stream);
+            if (notifyInvalidation)
+                PublishMicrophoneInvalidation(session);
             await cleanup.ConfigureAwait(false);
             // Keep the reader task incomplete until cleanup and callbacks end.
             // This prevents duplicate readers and Cancel/Dispose races on CTS.
             cancellation.Dispose();
+        }
+    }
+
+    private void PublishMicrophoneInvalidation(int session)
+    {
+        if (MicrophoneMuteStateInvalidated is not { } handlers)
+            return;
+
+        try
+        {
+            foreach (EventHandler handler in handlers.GetInvocationList())
+            {
+                // A callback may disconnect or replace the receiver. Check the
+                // session before each delivery. The reader task stays active
+                // during delivery, so a new reader cannot publish ahead of it.
+                lock (_featureLock)
+                {
+                    if (session != _session || !IsConnected)
+                        return;
+                }
+
+                handler(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
         }
     }
 
