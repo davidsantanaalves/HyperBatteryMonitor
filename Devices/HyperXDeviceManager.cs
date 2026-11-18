@@ -195,10 +195,16 @@ public sealed class HyperXDeviceManager : IDisposable
     }
 
     public static bool SupportsMicrophoneMuteMonitoring(
-        string? selectedDeviceName)
+        string? selectedDeviceName, IHyperXDevice? device = null)
     {
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
+
+        // The Stinger family mixes receivers with different capabilities.
+        // A model name alone must not advertise DTS-only microphone support.
+        if (IsSameDevice(selectedDeviceName, CloudStingerCoreWirelessDevice.DeviceDefinition.Name))
+            return device is ReceiverAwareDevice &&
+                IsSameDevice(selectedDeviceName, device.Name) && device.SupportsMicrophoneMuteMonitoring;
 
         return registration?.Definition.SupportsMicrophoneMuteMonitoring == true ||
             (TryGetReceiverFamily(selectedDeviceName, out string? group) &&

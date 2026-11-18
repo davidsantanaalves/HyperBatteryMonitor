@@ -10,6 +10,7 @@ namespace HyperXBatteryTray.Hid
         public static int MicrophoneOpens;
         public static int BatteryReads;
         public static int ConnectionReads;
+        public static Func<HyperXDeviceDefinition, bool> Present = _ => true;
         public static readonly List<byte[]> Commands = new();
         private bool _batteryRequest;
         private int _attempt;
@@ -21,6 +22,7 @@ namespace HyperXBatteryTray.Hid
             OpenMicrophone = _ => null;
             MicrophoneOpens = BatteryReads = ConnectionReads = 0;
             Commands.Clear();
+            Present = _ => true;
         }
 
         public static byte[] BatteryPacket(byte charge = 3, short millivolts = 3960)
@@ -59,7 +61,7 @@ namespace HyperXBatteryTray.Hid
         }
         public sealed record EndpointCandidate(string Path, string Collection);
         public static IReadOnlyList<EndpointCandidate> EnumerateControlEndpoints(HyperXDeviceDefinition definition) =>
-            new[] { new EndpointCandidate(definition.InterfacePattern, "Col03") };
+            Present(definition) ? new[] { new EndpointCandidate(definition.InterfacePattern, "Col03") } : [];
         public void Write(byte[] command) => throw new InvalidOperationException("Unexpected output report");
         public void WriteConfigurationReport(byte[] command) => throw new InvalidOperationException("Unexpected configuration write");
         public Task<byte[]?> ReadAsync(CancellationToken token) => throw new InvalidOperationException("Unexpected primary input read");

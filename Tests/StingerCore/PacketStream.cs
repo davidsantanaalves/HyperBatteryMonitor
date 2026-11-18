@@ -6,12 +6,16 @@ internal sealed class PacketStream : Stream
     public bool IgnoreCancellationAndDisposal { get; init; }
     public bool ThrowOnDispose { get; init; }
     public bool Disposed { get; private set; }
+    public Action? BeforeDispose { get; init; }
+    public Action? OnCancellation { get; init; }
+    public int DisposeCount;
     public TaskCompletionSource Reading { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public void Packet(params byte[] bytes) => _packets.Writer.TryWrite(bytes);
     public void Fail(Exception error) => _packets.Writer.TryWrite(error);
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         Reading.TrySetResult();
+        using var registration = OnCancellation == null ? default : cancellationToken.Register(OnCancellation);
         object next = await _packets.Reader.ReadAsync(IgnoreCancellationAndDisposal ? CancellationToken.None : cancellationToken);
         if (next is Exception error) throw error;
         byte[] packet = (byte[])next;
@@ -20,6 +24,8 @@ internal sealed class PacketStream : Stream
     }
     protected override void Dispose(bool disposing)
     {
+        Interlocked.Increment(ref DisposeCount);
+        BeforeDispose?.Invoke();
         Disposed = true;
         if (!IgnoreCancellationAndDisposal) _packets.Writer.TryWrite(new ObjectDisposedException(nameof(PacketStream)));
         if (ThrowOnDispose) throw new IOException("Scripted disposal failure");

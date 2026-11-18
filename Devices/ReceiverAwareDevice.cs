@@ -14,6 +14,7 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
     private readonly IReadOnlyList<HyperXDeviceRegistration> _registrations;
+    private readonly bool _requiresVerifiedMicrophone;
     private readonly object _lifetimeLock = new();
     private readonly SemaphoreSlim _batteryQueryGate = new(1, 1);
     private IReadOnlyList<ReceiverCandidate> _available = Array.Empty<ReceiverCandidate>();
@@ -34,6 +35,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
             throw new ArgumentException("At least one receiver registration is required.", nameof(candidates));
         _modelName = modelName;
         _registrations = candidates;
+        _requiresVerifiedMicrophone = candidates.Any(r =>
+            r.Definition.VendorId == 0x03F0 && r.Definition.ProductId == 0x0A8E);
     }
 
     public string Name => _modelName;
@@ -44,9 +47,21 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     public bool IsCharging => Volatile.Read(ref _active)?.IsCharging == true;
     public bool IsMicrophoneMuted => Volatile.Read(ref _active)?.IsMicrophoneMuted == true;
     public bool IsMicrophoneMuteStateKnown => Volatile.Read(ref _active)?.IsMicrophoneMuteStateKnown == true;
-    public bool SupportsMicrophoneMuteMonitoring =>
-        Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
-        _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
+    public bool SupportsMicrophoneMuteMonitoring
+    {
+        get
+        {
+            if (_requiresVerifiedMicrophone)
+            {
+                IHyperXDevice? active = Volatile.Read(ref _active);
+                return _verified && active is { VendorId: 0x03F0, ProductId: 0x0A8E,
+                    SupportsMicrophoneMuteMonitoring: true } &&
+                    ReferenceEquals(active, Volatile.Read(ref _active));
+            }
+            return Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
+                _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
+        }
+    }
 
     public bool SupportsAutoPowerOff => _verified &&
         Volatile.Read(ref _active) is IAutoPowerOffDevice { SupportsAutoPowerOff: true };

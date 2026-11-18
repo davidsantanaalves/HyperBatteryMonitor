@@ -103,6 +103,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
     private Stream? _microphoneStream;
     private CancellationTokenSource? _microphoneCancellation;
     private Task? _microphoneTask;
+    private Task? _microphoneCleanupTask;
     private long _microphoneRetryAfter;
 
     public event EventHandler? MicrophoneMuteStateInvalidated;
@@ -200,6 +201,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
             return;
         var cancellation = new CancellationTokenSource();
         _microphoneCancellation = cancellation;
+        _microphoneCleanupTask = null;
         int session = _session;
         string path = Connection.DevicePath;
         // Opening/enumerating the optional input collection must also be
@@ -214,6 +216,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
     private async Task ReadMicrophoneAsync(string path, int session, CancellationTokenSource cancellation)
     {
         Stream? stream = null;
+        bool published = false;
         CancellationToken token = cancellation.Token;
         try
         {
@@ -225,6 +228,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
             {
                 if (!IsCurrentMicrophoneReader(session, cancellation)) return;
                 _microphoneStream = stream;
+                published = true;
             }
             byte[] buffer = new byte[2];
             while (!token.IsCancellationRequested)
@@ -249,15 +253,14 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
         }
         finally
         {
+            Task cleanup;
             lock (_featureLock)
             {
-                // Serialize disposal with Disconnect, including a stream that
-                // finished opening after its session was canceled.
-                DisposeMicrophoneStream(stream);
+                // Transfer ownership once; cleanup never performs HID I/O or
+                // invokes cancellation callbacks on the feature-lock owner.
                 if (ReferenceEquals(cancellation, _microphoneCancellation))
                 {
                     bool current = IsCurrentMicrophoneReader(session, cancellation);
-                    _microphoneStream = null;
                     _microphoneCancellation = null;
                     if (current)
                     {
@@ -269,11 +272,31 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
                         }
                     }
                 }
-                // The worker owns its CTS until it has stopped using the token.
-                // Keep _microphoneTask tracked until completed, even on disconnect.
-                cancellation.Dispose();
+                cleanup = BeginMicrophoneCleanup(cancellation);
             }
+            // A stream opened after Disconnect was never published, so only
+            // this worker owns it. Published streams belong to cleanup.
+            if (!published) DisposeMicrophoneStream(stream);
+            await cleanup.ConfigureAwait(false);
+            // Keep the reader task incomplete until cleanup and callbacks end.
+            // This prevents duplicate readers and Cancel/Dispose races on CTS.
+            cancellation.Dispose();
         }
+    }
+
+    // Called under _featureLock. Task.Run only schedules work; all potentially
+    // blocking cancellation/disposal runs independently of battery queries.
+    private Task BeginMicrophoneCleanup(CancellationTokenSource cancellation)
+    {
+        if (_microphoneCleanupTask != null) return _microphoneCleanupTask;
+        Stream? stream = _microphoneStream;
+        _microphoneStream = null;
+        return _microphoneCleanupTask = Task.Run(() =>
+        {
+            try { cancellation.Cancel(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+            DisposeMicrophoneStream(stream);
+        });
     }
 
     private static void DisposeMicrophoneStream(Stream? stream)
@@ -378,9 +401,8 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IM
         lock (_featureLock)
         {
             _session++;
-            try { _microphoneCancellation?.Cancel(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
-            DisposeMicrophoneStream(_microphoneStream);
+            if (_microphoneCancellation != null)
+                BeginMicrophoneCleanup(_microphoneCancellation);
             _microphoneRetryAfter = 0;
             _chargeCode = null;
             _lastChargeCode = NoChargingValue;

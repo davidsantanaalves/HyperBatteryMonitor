@@ -39,7 +39,14 @@ internal static class Program
             ("cancellation releases a pending read", Cancellation),
             ("late read cannot mutate reconnected session or duplicate readers", StaleRead),
             ("disconnect during open rejects and disposes late stream", StaleOpen),
-            ("unknown-state subscriber exception is observed", SubscriberFailure)
+            ("unknown-state subscriber exception is observed", SubscriberFailure),
+            ("EOF disposal cannot block battery or charging", () => SlowCleanup(false, false)),
+            ("disconnect disposal cannot block reconnect or battery", () => SlowCleanup(true, false)),
+            ("blocking cancellation cannot block reconnect or battery", () => SlowCleanup(true, true)),
+            ("Kingston receiver family capability", () => ReceiverCapability(CloudStingerCoreWirelessDevice.DeviceDefinition)),
+            ("PlayStation receiver family capability", () => ReceiverCapability(CloudStingerCoreWirelessDevice.PlayStationDefinition)),
+            ("DTS capability requires receiver verification", () => ReceiverCapability(CloudStingerCoreWirelessDevice.DtsDefinition)),
+            ("unrelated receiver capability fallback is unchanged", OtherFamilyCapability)
         ];
         foreach (var test in tests)
         {
@@ -256,5 +263,81 @@ internal static class Program
         stream.Packet(0x65, 4); await Until(() => device.IsMicrophoneMuteStateKnown);
         stream.Packet(); await Reader(device).WaitAsync(Timeout);
         Check(Reader(device).IsCompletedSuccessfully && device.IsConnected && !device.IsMicrophoneMuteStateKnown, "callback fault escaped background task");
+    }
+
+    private static async Task SlowCleanup(bool disconnect, bool blockCancellation)
+    {
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Block() { entered.TrySetResult(); Check(release.Wait(Timeout), "cleanup not released"); }
+        var stream = new PacketStream
+        {
+            BeforeDispose = blockCancellation ? null : Block,
+            OnCancellation = blockCancellation ? Block : null
+        };
+        HidConnection.OpenMicrophone = _ => stream;
+        HidConnection.BatteryReply = _ => HidConnection.BatteryPacket(charge: 5);
+        using var device = Dts();
+        Check(device.Connect(), "connect"); await device.QueryBatteryAsync();
+        await stream.Reading.Task.WaitAsync(Timeout);
+        stream.Packet(0x65, 4); await Until(() => device.IsMicrophoneMuteStateKnown);
+        Task reader = Reader(device);
+        Task trigger = disconnect ? Task.Run(device.Disconnect) : Task.Run(() => stream.Packet());
+        try
+        {
+            await entered.Task.WaitAsync(Timeout);
+            await trigger.WaitAsync(TimeSpan.FromSeconds(1));
+            if (disconnect) Check(device.Connect(), "reconnect during cleanup");
+            else Check(!device.IsMicrophoneMuteStateKnown, "stale mute while disposal is blocked");
+            // Run calls on another thread because a lock regression blocks
+            // synchronously before Query* returns its task. Never release
+            // disposal until both queries have completed independently.
+            int? battery = await Task.Run(() => device.QueryBatteryAsync()).WaitAsync(TimeSpan.FromSeconds(1));
+            bool? charging = await Task.Run(() => device.QueryChargeStatusAsync()).WaitAsync(TimeSpan.FromSeconds(1));
+            Check(battery.HasValue && charging == true, "battery/charging blocked by cleanup");
+            AllowRetry(device); await device.QueryBatteryAsync();
+            Check(!reader.IsCompleted && HidConnection.MicrophoneOpens == 1, "duplicate reader during cleanup");
+        }
+        finally { release.Set(); }
+        await trigger.WaitAsync(Timeout); await reader.WaitAsync(Timeout);
+        Check(stream.DisposeCount == 1 && reader.IsCompletedSuccessfully, "cleanup must own and dispose stream exactly once");
+    }
+
+    private static async Task ReceiverCapability(HyperXDeviceDefinition selected)
+    {
+        HyperXDeviceDefinition[] definitions = [CloudStingerCoreWirelessDevice.DeviceDefinition,
+            CloudStingerCoreWirelessDevice.PlayStationDefinition, CloudStingerCoreWirelessDevice.DtsDefinition];
+        HidConnection.Present = definition => definition.ProductId == selected.ProductId;
+        var drivers = new List<CloudStingerCoreWirelessDevice>();
+        using var receiver = new ReceiverAwareDevice("HyperX Cloud Stinger Core Wireless + 7.1",
+            definitions.Select(definition => new HyperXDeviceRegistration
+            {
+                Definition = definition,
+                Factory = () => { var driver = new CloudStingerCoreWirelessDevice(definition); drivers.Add(driver); return driver; }
+            }).ToArray());
+        Check(!receiver.SupportsMicrophoneMuteMonitoring, "family fallback advertised DTS before discovery");
+        Check(receiver.Connect(), "receiver connect");
+        Check(!receiver.SupportsMicrophoneMuteMonitoring, "unverified receiver advertised microphone");
+        HidConnection.BatteryReply = _ => null;
+        Check(await receiver.QueryBatteryAsync() == null && !receiver.SupportsMicrophoneMuteMonitoring,
+            "failed verification advertised microphone");
+        HidConnection.BatteryReply = _ => HidConnection.BatteryPacket();
+        Check((await receiver.QueryBatteryAsync()).HasValue, "receiver verification");
+        Check(receiver.SupportsMicrophoneMuteMonitoring == (selected.ProductId == 0x0A8E), "wrong receiver capability");
+        receiver.Disconnect();
+        Check(!receiver.SupportsMicrophoneMuteMonitoring, "disconnected family advertised microphone");
+        foreach (var driver in drivers) await Reader(driver).WaitAsync(Timeout);
+    }
+
+    private static Task OtherFamilyCapability()
+    {
+        var definition = new HyperXDeviceDefinition { Name = "Unrelated receiver", VendorId = 0x0951,
+            ProductId = 0x1234, InterfacePattern = "test", SupportsMicrophoneMuteMonitoring = true,
+            BatteryCommandBytes = [], BatteryByteIndex = 0 };
+        using var receiver = new ReceiverAwareDevice("Other family", [new() { Definition = definition,
+            Factory = () => new CloudStingerCoreWirelessDevice(definition) }]);
+        Check(receiver.SupportsMicrophoneMuteMonitoring, "unrelated disconnected fallback changed");
+        Check(receiver.Connect() && receiver.SupportsMicrophoneMuteMonitoring, "unrelated unverified fallback changed");
+        return Task.CompletedTask;
     }
 }

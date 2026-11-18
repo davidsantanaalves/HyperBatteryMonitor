@@ -275,7 +275,7 @@ public sealed partial class SettingsForm : Form
             _sidebarBatteryLabel.Text = L("BatteryNA");
         }
         bool microphoneMonitoringSupported =
-            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized);
+            selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized, _device);
         bool microphoneStatusAvailable =
             connected &&
             microphoneMonitoringSupported &&

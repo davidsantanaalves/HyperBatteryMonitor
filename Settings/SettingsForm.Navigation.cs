@@ -552,7 +552,7 @@ public sealed partial class SettingsForm : Form
 
         bool microphoneMonitoringSupported =
             HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(
-                _pendingSelectedDevice);
+                _pendingSelectedDevice, _device);
 
         RoundedPanel microphoneMuteCard =
             CreateResponsiveCard(NotificationSimpleCardLogicalHeight);
