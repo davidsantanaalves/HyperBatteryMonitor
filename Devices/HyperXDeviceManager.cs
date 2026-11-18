@@ -72,6 +72,12 @@ public sealed class HyperXDeviceManager : IDisposable
             },
             new()
             {
+                Definition = CloudStingerCoreWirelessDevice.DtsDefinition,
+                Factory = () => new CloudStingerCoreWirelessDevice(
+                    CloudStingerCoreWirelessDevice.DtsDefinition)
+            },
+            new()
+            {
                 Definition = Cloud3WirelessAlternateReceiverDevice.Definition,
                 Factory = () => new Cloud3WirelessAlternateReceiverDevice()
             },
@@ -354,7 +360,8 @@ public sealed class HyperXDeviceManager : IDisposable
             ["HyperX Cloud Stinger Core Wireless + 7.1"] = new[]
             {
                 "HyperX Cloud Stinger Core Wireless + 7.1",
-                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)"
+                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)",
+                "HyperX Cloud Stinger Core Wireless DTS"
             }
         };
 

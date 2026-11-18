@@ -118,7 +118,7 @@ Version 2.4.0 retains the ten original headset registrations and adds ten furthe
 | HyperX Cloud Stinger 2 | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight S | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight Wireless | ✅ | ✅ | ⛔ |
-| HyperX Cloud Stinger Core Wireless + 7.1 (original / PlayStation receivers) | ✅ | ✅ | ⛔ |
+| HyperX Cloud Stinger Core Wireless + 7.1 (original / PlayStation / DTS receivers) | ✅ | ✅ | ⛔ |
 | HyperX Cloud Flight 2 **(Dedicated Dongle)** | ✅ | ✅ | ✅ |
 | HyperX Cloud Mix 2 | ✅ | ⛔ | ✅ |
 | HyperX Cloud III Wireless (receiver `03F0:0FCC`) | ✅ | ✅ | ✅ |
@@ -136,6 +136,8 @@ Version 2.4.0 retains the ten original headset registrations and adds ten furthe
 **Dedicated dongle and TIO support:** existing Cloud III S and Cloud Flight 2 dedicated-dongle configurations remain supported. Selected Cloud III S and Cloud Flight 2 variants can also be monitored through a compatible HyperX Three-In-One (TIO) receiver, one headset at a time. TIO slot selection and other new hardware combinations may vary by device and firmware.
 
 **Field validation:** Cloud III Wireless operation was checked by the maintainer; a Cloud III S receiver `03F0:02CC` was confirmed working by a tester in Beta 4. A tester also confirmed Cloud Stinger Core PlayStation `03F0:0A93` using the official Beta 5 installer, including detection and recovery after receiver reconnect and headset power-cycle. Battery readings during charging may be overestimated for this PlayStation receiver because its voltage curve has not been calibrated separately.
+
+**Cloud Stinger Core Wireless DTS:** receiver `03F0:0A8E` uses `MI_03&Col03` and is grouped under **HyperX Cloud Stinger Core Wireless + 7.1** in the device selector. Automatic detection, manual selection and repeated battery readings were verified on this receiver on Windows. The existing voltage curves and charging parser are reused; charging transitions and voltage calibration have not been separately validated on DTS hardware. Microphone mute monitoring and configurable auto power-off are not implemented for this receiver.
 
 **Windows Bluetooth battery fallback:** on selected Cloud III S, Cloud Alpha 2, Cloud Flight 2, Cloud Stinger 3 and Cloud MIX 2 configurations, HBM can read battery percentage exposed by Windows. Valid USB/HID values take precedence. Bluetooth-only fallback does not establish microphone mute, charging status or estimated runtime; some headset/adapter combinations do not expose battery percentage.
 

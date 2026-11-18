@@ -11,6 +11,9 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private const ushort PlayStationVendorId = 0x03F0;
     private const ushort PlayStationProductId = 0x0A93;
     private const string PlayStationControlInterface = "VID_03F0&PID_0A93&MI_03&Col03";
+    private const ushort DtsVendorId = 0x03F0;
+    private const ushort DtsProductId = 0x0A8E;
+    private const string DtsControlInterface = "VID_03F0&PID_0A8E&MI_03&Col03";
     private const byte PlayStationResponseType = 0x12;
     private const byte PlayStationResponseCommand = 0x05;
     private const int PlayStationBatteryResponseAttempts = 10;
@@ -73,7 +76,22 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
         NominalBatteryLifeHours = 17
     };
 
-    private readonly bool _isPlayStationReceiver;
+    internal static readonly HyperXDeviceDefinition DtsDefinition = new()
+    {
+        Name = "HyperX Cloud Stinger Core Wireless DTS",
+        VendorId = DtsVendorId,
+        ProductId = DtsProductId,
+        InterfacePattern = DtsControlInterface,
+        ControlUsagePage = 0xFF00,
+        ControlUsage = 0x0001,
+        BatteryCommandBytes = BatteryCommand,
+        BatteryByteIndex = VoltageIndex,
+        SupportsMicrophoneMuteMonitoring = false,
+        SupportsChargingMonitoring = true,
+        NominalBatteryLifeHours = 17
+    };
+
+    private readonly bool _requiresBatteryResponseValidation;
     private readonly object _featureLock = new();
     private bool _requestPending;
     private int _session;
@@ -87,10 +105,12 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
 
     internal CloudStingerCoreWirelessDevice(HyperXDeviceDefinition definition) : base(definition)
     {
-        // Only this documented receiver revision uses FF 12 05 battery
-        // confirmation and multi-read handling of the stale FF 01 00 report.
-        _isPlayStationReceiver = definition.VendorId == PlayStationVendorId &&
-            definition.ProductId == PlayStationProductId;
+        // The DTS receiver uses the same FF 12 05 battery response as the
+        // PlayStation revision; retain the original Kingston read behavior.
+        _requiresBatteryResponseValidation = (definition.VendorId == PlayStationVendorId &&
+            definition.ProductId == PlayStationProductId) ||
+            (definition.VendorId == DtsVendorId &&
+            definition.ProductId == DtsProductId);
     }
 
     public override async Task<int?> QueryBatteryAsync(CancellationToken cancellationToken = default)
@@ -114,7 +134,7 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
 
             byte[]? report = await ExchangeFeatureAsync(
                     BatteryCommand, session, cancellationToken,
-                    _isPlayStationReceiver ? IsPlayStationBatteryResponse : null)
+                    _requiresBatteryResponseValidation ? IsPlayStationBatteryResponse : null)
                 .ConfigureAwait(false);
             if (report == null || report.Length < VoltageIndex + VoltageByteCount)
                 return null;
