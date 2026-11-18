@@ -410,6 +410,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         }
 
         _settingsForm?.SetCharging(_isCharging);
+        if ((_blinkTimer != null) != ShouldRunBlinkTimer())
+            RestartBlinkTimer();
         UpdateTrayIcon();
         UpdateTray();
         _trayMenu?.UpdateDevice(
@@ -580,6 +582,11 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private static string NormalizeDeviceName(string value) =>
         HyperXDeviceManager.NormalizeSupportedDeviceName(value);
 
+    private bool ShouldRunBlinkTimer() =>
+        _settings.BlinkOnCriticalBattery ||
+        (_settings.ShowMicrophoneMuteInSystray &&
+            _device?.SupportsMicrophoneMuteMonitoring == true);
+
     private void RestartBlinkTimer()
     {
         _blinkTimer?.Stop();
@@ -587,12 +594,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _blinkTimer = null;
         _blinkState = false;
 
-        bool microphoneMuteBlinkSupported =
-            _settings.ShowMicrophoneMuteInSystray &&
-            _device?.SupportsMicrophoneMuteMonitoring == true;
-
-        if (!_settings.BlinkOnCriticalBattery &&
-            !microphoneMuteBlinkSupported)
+        if (!ShouldRunBlinkTimer())
             return;
 
         _blinkTimer = new System.Windows.Forms.Timer { Interval = 600 };
