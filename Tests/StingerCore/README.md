@@ -23,6 +23,9 @@ Coverage:
   and charging monitoring, throttled reopen and return to event-driven mute state.
 - Invalidation forwarding through the production receiver dispatcher and monitor;
   the same mute value must be delivered again after recovery.
+- Blocked invalidation callbacks preserve battery/charging queries, cleanup and
+  event order. Disconnect/reconnect during invalidation stops delivery to the old
+  session.
 - A running battery monitor continues polling after microphone failure without
   emitting a disconnected state; microphone events add no HID query traffic.
 - Missing collection, access denied, unexpected read/disposal/subscriber errors.
@@ -40,7 +43,8 @@ reflection so they can verify recovery without sleeping for ten seconds. They
 first verify that ordinary battery queries respect the real cooldown. Asynchronous
 checks have bounded timeouts; no device changes or USB writes are performed.
 
-The 20 driver/dispatcher scenarios are complemented by 15 Windows UI cases:
+The 22 driver/dispatcher scenarios are complemented by 17 Windows UI cases,
+for a total of 39 automated regression cases.
 
 ```sh
 dotnet run --project Tests/StingerCoreUi/StingerCoreUi.Tests.csproj -c Release
@@ -51,7 +55,16 @@ saving preferences, and check capability badges, microphone labels, selected ico
 assets and theme changes for all three variants. Receiver state is injected using
 reflection, without opening HID connections.
 
+The two additional UI cases verify that a verified DTS receiver starts the
+muted-microphone tray blink according to the saved preference, and that the
+Notifications mute toggle refreshes in place when receiver capabilities change
+while preserving saved and pending preferences.
+
 The Windows application is built separately to check the production HID
 implementation. Automated tests do not claim physical validation of
-Kingston/PlayStation receivers, Windows device discovery, charging calibration,
-multiple DTS receivers, or the maintainer's unpublished Beta 3 integration source.
+Kingston/PlayStation receivers, Windows device discovery, charging transitions,
+full-charge behavior, DTS-specific voltage calibration, multiple simultaneous DTS
+receivers, or visual UI interaction after a forced listener failure. These tests
+exercise the integrated Beta 3 production source. Physical DTS battery and
+microphone validation was reported by @shapkees in PR #16.
+[PR #16](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/16)

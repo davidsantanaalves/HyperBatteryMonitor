@@ -1,12 +1,27 @@
 # Hyper Battery Monitor v2.5.0 BETA 3
 
-**Redesigned About & Updates Experience, Diagnostics for Every Release Channel**
+**Cloud Stinger Core Wireless DTS Support, Redesigned About & Updates, Optional Diagnostics**
 
-This prerelease focuses on a clearer, more consistent settings experience and gives users direct control over optional diagnostic logging, regardless of whether they use the Stable or Beta release channel. The existing headset monitoring and Auto Power-Off features remain available, subject to their previously documented compatibility limits.
+This prerelease adds Cloud Stinger Core Wireless DTS receiver support, refreshes the About & Updates experience, and gives users direct control over optional diagnostic logging in both Stable and Beta builds. Headset feature availability remains specific to the receiver, firmware and connection method. See the hardware limitations below.
 
 **This is an experimental GitHub prerelease, not a Stable or Microsoft Store release.**
 
 ## What's New
+
+### Cloud Stinger Core Wireless DTS
+
+- Added battery monitoring and passive microphone mute reporting for the **HyperX Cloud Stinger Core Wireless DTS** receiver (`03F0:0A8E`). It is grouped under **HyperX Cloud Stinger Core Wireless + 7.1** in the device selector.
+- Battery queries use the receiver's `MI_03&Col03` collection. The existing charging-status parser and voltage curves are reused.
+- Microphone mute events are read from the input-only `MI_03&Col02` collection (`FFC0:0001`). Lowering the boom reports unmuted, and raising it past the click reports muted. Settings and the tray reflect the verified receiver's capabilities, and the optional muted-microphone tray indication respects the user's preferences.
+- If the optional microphone listener fails, battery/charging monitoring continues and microphone status returns to **N/A**. Recovery is attempted during an existing successful battery poll, no sooner than ten seconds after failure, without additional microphone polling or HID query traffic.
+
+#### Hardware limitations
+
+Microphone status remains **N/A** after startup, reconnection or listener recovery until the boom is raised or lowered. A working initial-state query has yet to be established. DTS mute support requires a verified DTS receiver. Mute support for the original Kingston and PlayStation variants remains unverified.
+
+Physical DTS battery and microphone validation was reported by the contributor. Charging transitions, full-charge behavior, DTS-specific voltage calibration, multiple simultaneous DTS receivers and visual UI interaction after a forced listener failure remain physically unvalidated. Kingston/PlayStation regression coverage uses simulated hardware. Configurable **Auto Power-Off is unsupported** on DTS. The headset's built-in idle shutdown operates independently of HBM. Compatibility with other receivers and firmware versions requires separate validation.
+
+Thanks to **@shapkees** for the original DTS receiver implementation, microphone event captures, hardware validation and regression tests in PR #16. All four original commits and their Git authorship are preserved in the integrated Beta 3 history. [@shapkees](https://github.com/shapkees) · [PR #16](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/16)
 
 ### Redesigned Settings → About
 
@@ -51,6 +66,7 @@ Please let us know if you encounter:
 - Unexpected behavior when enabling/disabling diagnostics or reviewing consent terms.
 - Incorrect update status, download progress, release notes, or ready-to-install actions.
 - Headset disconnections, incorrect battery/charging/microphone status, or Auto Power-Off settings that fail to persist.
+- Cloud Stinger Core Wireless DTS battery/charging readings, microphone boom events, and microphone listener recovery, including receiver VID/PID and firmware where available.
 
 When reporting an issue, include the HBM version, Windows version, headset model and receiver VID/PID if available, and steps to reproduce. If sharing diagnostic `.jsonl` files, review and remove sensitive data first.
 
