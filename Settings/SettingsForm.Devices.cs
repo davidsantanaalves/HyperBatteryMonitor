@@ -205,6 +205,18 @@ public sealed partial class SettingsForm : Form
         UpdateSidebarDeviceStatus(selected, connected);
         UpdateDeviceInformation();
         RefreshAutoPowerOffState();
+        RefreshNotificationMicrophoneToggle();
+    }
+
+    private void RefreshNotificationMicrophoneToggle()
+    {
+        if (_currentPage != "Notifications" || _showMicrophoneMuteInSystrayToggle is not { IsDisposed: false } toggle)
+            return;
+
+        bool supported = HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(
+            _pendingSelectedDevice, _device);
+        toggle.Enabled = supported;
+        toggle.SetChecked(supported && _pendingShowMicrophoneMuteInSystray, notify: false);
     }
 
     private void UpdateSidebarDeviceStatus(bool selected, bool connected)

@@ -19,7 +19,19 @@ public sealed partial class SettingsForm : Form
 
         public event EventHandler? CheckedChanged;
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public bool Checked { get => _checked; set { if (_checked == value) return; _checked = value; Invalidate(); CheckedChanged?.Invoke(this, EventArgs.Empty); } }
+        public bool Checked { get => _checked; set => SetChecked(value, notify: true); }
+
+        public void SetChecked(bool value, bool notify)
+        {
+            if (_checked == value)
+                return;
+
+            _checked = value;
+            Invalidate();
+            if (notify)
+                CheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool DarkMode { get => _dark; set { _dark = value; Invalidate(); } }
 
