@@ -3,7 +3,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
+public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase, IMicrophoneMuteStateInvalidationSource
 {
     private const ushort DeviceVendorId = 0x0951;
     private const ushort DeviceProductId = 0x170B;
@@ -99,8 +99,13 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
     private byte? _chargeCode;
     private byte _lastChargeCode = NoChargingValue;
     private int _chargeRepeatCount;
-    private FileStream? _microphoneStream;
+    private const int MicrophoneRetryMilliseconds = 10000;
+    private Stream? _microphoneStream;
     private CancellationTokenSource? _microphoneCancellation;
+    private Task? _microphoneTask;
+    private long _microphoneRetryAfter;
+
+    public event EventHandler? MicrophoneMuteStateInvalidated;
 
     public CloudStingerCoreWirelessDevice() : this(DeviceDefinition)
     {
@@ -188,22 +193,39 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
 
     private void EnsureMicrophoneReader()
     {
-        if (!SupportsMicrophoneMuteMonitoring || _microphoneStream != null || Connection.DevicePath == null)
+        // Called under _featureLock after a valid battery sample. Reuse the
+        // existing monitor cadence: no retry timer or microphone query traffic.
+        if (!SupportsMicrophoneMuteMonitoring || _microphoneTask is { IsCompleted: false } ||
+            Connection.DevicePath == null || Environment.TickCount64 < _microphoneRetryAfter)
             return;
-        FileStream? stream = HidConnection.OpenSiblingInputStream(Connection.DevicePath,
-            "VID_03F0&PID_0A8E&MI_03&Col02", 0xFFC0, 0x0001, 2);
-        if (stream == null) return;
-        _microphoneStream = stream;
-        _microphoneCancellation = new CancellationTokenSource();
-        CancellationToken token = _microphoneCancellation.Token;
+        var cancellation = new CancellationTokenSource();
+        _microphoneCancellation = cancellation;
         int session = _session;
-        _ = Task.Run(() => ReadMicrophoneAsync(stream, session, token));
+        string path = Connection.DevicePath;
+        // Opening/enumerating the optional input collection must also be
+        // isolated from the primary battery query and its lock.
+        _microphoneTask = Task.Run(() => ReadMicrophoneAsync(path, session, cancellation));
     }
 
-    private async Task ReadMicrophoneAsync(FileStream stream, int session, CancellationToken token)
+    private bool IsCurrentMicrophoneReader(int session, CancellationTokenSource cancellation) =>
+        session == _session && IsConnected && !cancellation.IsCancellationRequested &&
+        ReferenceEquals(cancellation, _microphoneCancellation);
+
+    private async Task ReadMicrophoneAsync(string path, int session, CancellationTokenSource cancellation)
     {
+        Stream? stream = null;
+        CancellationToken token = cancellation.Token;
         try
         {
+            token.ThrowIfCancellationRequested();
+            stream = HidConnection.OpenSiblingInputStream(path,
+                "VID_03F0&PID_0A8E&MI_03&Col02", 0xFFC0, 0x0001, 2);
+            if (stream == null) return;
+            lock (_featureLock)
+            {
+                if (!IsCurrentMicrophoneReader(session, cancellation)) return;
+                _microphoneStream = stream;
+            }
             byte[] buffer = new byte[2];
             while (!token.IsCancellationRequested)
             {
@@ -212,23 +234,52 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
                 bool? muted = ParseDtsMicrophoneReport(buffer.AsSpan(0, count));
                 lock (_featureLock)
                 {
-                    if (session != _session || !IsConnected || token.IsCancellationRequested) return;
+                    if (!IsCurrentMicrophoneReader(session, cancellation)) return;
                     if (muted.HasValue) UpdateMicrophoneMuteState(muted.Value);
                 }
             }
         }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-        catch (IOException) { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (token.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            // Optional reader/open failures cannot escape into battery polling
+            // or become unobserved task exceptions. No diagnostics opt-in changes.
+            System.Diagnostics.Debug.WriteLine($"DTS microphone reader: {ex}");
+        }
         finally
         {
             lock (_featureLock)
             {
-                // Reconnect rather than retaining a stale mute state after losing events.
-                if (session == _session && IsConnected && !token.IsCancellationRequested)
-                    Disconnect();
+                // Serialize disposal with Disconnect, including a stream that
+                // finished opening after its session was canceled.
+                DisposeMicrophoneStream(stream);
+                if (ReferenceEquals(cancellation, _microphoneCancellation))
+                {
+                    bool current = IsCurrentMicrophoneReader(session, cancellation);
+                    _microphoneStream = null;
+                    _microphoneCancellation = null;
+                    if (current)
+                    {
+                        _microphoneRetryAfter = Environment.TickCount64 + MicrophoneRetryMilliseconds;
+                        if (ResetMicrophoneMuteState())
+                        {
+                            try { MicrophoneMuteStateInvalidated?.Invoke(this, EventArgs.Empty); }
+                            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+                        }
+                    }
+                }
+                // The worker owns its CTS until it has stopped using the token.
+                // Keep _microphoneTask tracked until completed, even on disconnect.
+                cancellation.Dispose();
             }
         }
+    }
+
+    private static void DisposeMicrophoneStream(Stream? stream)
+    {
+        try { stream?.Dispose(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
 
     private async Task<byte[]?> ExchangeFeatureAsync(
@@ -327,11 +378,10 @@ public sealed class CloudStingerCoreWirelessDevice : HyperXBatteryDeviceBase
         lock (_featureLock)
         {
             _session++;
-            _microphoneCancellation?.Cancel();
-            _microphoneStream?.Dispose();
-            _microphoneStream = null;
-            _microphoneCancellation?.Dispose();
-            _microphoneCancellation = null;
+            try { _microphoneCancellation?.Cancel(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+            DisposeMicrophoneStream(_microphoneStream);
+            _microphoneRetryAfter = 0;
             _chargeCode = null;
             _lastChargeCode = NoChargingValue;
             _chargeRepeatCount = 0;

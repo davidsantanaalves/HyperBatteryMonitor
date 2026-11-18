@@ -755,6 +755,16 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
             MicrophoneMuteChanged?.Invoke(this, isMuted);
     }
 
+    // Opt-in reset for an auxiliary listener that lost events while the main
+    // connection remains healthy. Does not manufacture an "unmuted" event.
+    protected bool ResetMicrophoneMuteState()
+    {
+        bool wasKnown = _isMicrophoneMuteStateKnown;
+        _isMicrophoneMuted = false;
+        _isMicrophoneMuteStateKnown = false;
+        return wasKnown;
+    }
+
     private void SetBatteryUnavailable()
     {
         if (_battery == -1)

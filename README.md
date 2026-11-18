@@ -105,7 +105,7 @@ The same information is also available from the system tray context menu and too
 
 ## Supported Devices
 
-Version 2.4.0 retains the ten original headset registrations and adds ten further model/receiver registrations. Some variants are grouped under the same headset name below. Feature availability depends on the receiver, firmware and connection method; not all new variants have been validated on physical hardware.
+Version 2.4.0 retains the ten original headset registrations and adds ten further model/receiver registrations. Cloud Stinger Core Wireless DTS support is being introduced in **v2.5.0 Beta 3**. The table below includes this upcoming addition. Some variants are grouped under the same headset name below. Feature availability depends on the receiver, firmware and connection method; not all new variants have been validated on physical hardware.
 
 ### Feature availability
 
@@ -134,7 +134,7 @@ Version 2.4.0 retains the ten original headset registrations and adds ten furthe
 
 **¹ Cloud Stinger 3 charging state** may depend on supported device notifications. Availability in the matrix indicates an implemented capability, not universal validation of each headset firmware/receiver revision.
 
-**² Cloud Stinger Core Wireless DTS microphone state** is event-driven: after starting monitoring or reconnecting, it remains **N/A** until the microphone boom is raised or lowered. The original Kingston and PlayStation receiver variants do not have verified mute support.
+**² Cloud Stinger Core Wireless DTS microphone state (v2.5.0 Beta 3)** is event-driven: after starting monitoring, reconnecting or recovering the microphone listener, it remains **N/A** until the microphone boom is raised or lowered. If this optional listener fails, battery/charging monitoring continues and the microphone returns to **N/A**. Recovery is attempted during an existing successful battery poll, no sooner than ten seconds after failure; there is no extra microphone polling or query traffic. The original Kingston and PlayStation receiver variants do not have verified mute support. Automated regression checks are documented in [Tests/StingerCore](Tests/StingerCore/README.md).
 
 **Dedicated dongle and TIO support:** existing Cloud III S and Cloud Flight 2 dedicated-dongle configurations remain supported. Selected Cloud III S and Cloud Flight 2 variants can also be monitored through a compatible HyperX Three-In-One (TIO) receiver, one headset at a time. TIO slot selection and other new hardware combinations may vary by device and firmware.
 

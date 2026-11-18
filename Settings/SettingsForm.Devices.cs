@@ -53,6 +53,7 @@ public sealed partial class SettingsForm : Form
         previewMonitor.ConnectionChanged += DevicePreviewMonitor_ConnectionChanged;
         previewMonitor.ChargingChanged += DevicePreviewMonitor_ChargingChanged;
         previewMonitor.MicrophoneMuteChanged += DevicePreviewMonitor_MicrophoneMuteChanged;
+        previewMonitor.MicrophoneMuteStateInvalidated += DevicePreviewMonitor_MicrophoneMuteStateInvalidated;
 
         _devicePreviewMonitor = previewMonitor;
         previewMonitor.Start();
@@ -66,6 +67,7 @@ public sealed partial class SettingsForm : Form
             _devicePreviewMonitor.ConnectionChanged -= DevicePreviewMonitor_ConnectionChanged;
             _devicePreviewMonitor.ChargingChanged -= DevicePreviewMonitor_ChargingChanged;
             _devicePreviewMonitor.MicrophoneMuteChanged -= DevicePreviewMonitor_MicrophoneMuteChanged;
+            _devicePreviewMonitor.MicrophoneMuteStateInvalidated -= DevicePreviewMonitor_MicrophoneMuteStateInvalidated;
             _devicePreviewMonitor.Dispose();
             _devicePreviewMonitor = null;
         }
@@ -88,6 +90,8 @@ public sealed partial class SettingsForm : Form
 
         device.BatteryChanged += Device_BatteryChanged;
         device.MicrophoneMuteChanged += Device_MicrophoneMuteChanged;
+        if (device is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated += Device_MicrophoneMuteStateInvalidated;
     }
 
     private void UnsubscribeFromDeviceStatusEvents(IHyperXDevice? device)
@@ -97,6 +101,8 @@ public sealed partial class SettingsForm : Form
 
         device.BatteryChanged -= Device_BatteryChanged;
         device.MicrophoneMuteChanged -= Device_MicrophoneMuteChanged;
+        if (device is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated -= Device_MicrophoneMuteStateInvalidated;
     }
 
     private void DevicePreviewMonitor_BatteryChanged(object? sender, int battery) =>
@@ -107,6 +113,12 @@ public sealed partial class SettingsForm : Form
 
     private void DevicePreviewMonitor_MicrophoneMuteChanged(object? sender, bool muted) =>
         RefreshDevicePreviewStatus(sender);
+
+    private void DevicePreviewMonitor_MicrophoneMuteStateInvalidated(object? sender, EventArgs e) =>
+        RefreshDevicePreviewStatus(sender);
+
+    private void Device_MicrophoneMuteStateInvalidated(object? sender, EventArgs e) =>
+        Device_MicrophoneMuteChanged(sender, false);
 
     private void DevicePreviewMonitor_ChargingChanged(object? sender, bool charging)
     {

@@ -9,7 +9,7 @@ namespace HyperXBatteryTray.Devices;
 /// endpoint is active at a time. Previously successful collections are tried
 /// first, but are never trusted without a fresh response after reconnection.
 /// </summary>
-internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
+internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IMicrophoneMuteStateInvalidationSource
 {
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
@@ -82,6 +82,7 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     public event EventHandler<int>? BatteryChanged;
     public event EventHandler<bool>? ChargingChanged;
     public event EventHandler<bool>? MicrophoneMuteChanged;
+    public event EventHandler? MicrophoneMuteStateInvalidated;
 
     public bool Connect()
     {
@@ -302,6 +303,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         _active.BatteryChanged += Active_BatteryChanged;
         _active.ChargingChanged += Active_ChargingChanged;
         _active.MicrophoneMuteChanged += Active_MicrophoneMuteChanged;
+        if (_active is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated += Active_MicrophoneMuteStateInvalidated;
         ReceiverCandidate c = _available[index];
         if (c.IsDedicated)
             HidEndpointPreferenceStore.Remember(_modelName,
@@ -339,6 +342,12 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
             MicrophoneMuteChanged?.Invoke(this, muted);
     }
 
+    private void Active_MicrophoneMuteStateInvalidated(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(sender, Volatile.Read(ref _active)))
+            MicrophoneMuteStateInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
     private void ReleaseActive()
     {
         IHyperXDevice? old = Interlocked.Exchange(ref _active, null);
@@ -350,6 +359,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         old.BatteryChanged -= Active_BatteryChanged;
         old.ChargingChanged -= Active_ChargingChanged;
         old.MicrophoneMuteChanged -= Active_MicrophoneMuteChanged;
+        if (old is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated -= Active_MicrophoneMuteStateInvalidated;
         old.Dispose();
     }
 
