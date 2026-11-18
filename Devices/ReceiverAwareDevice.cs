@@ -9,11 +9,12 @@ namespace HyperXBatteryTray.Devices;
 /// endpoint is active at a time. Previously successful collections are tried
 /// first, but are never trusted without a fresh response after reconnection.
 /// </summary>
-internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
+internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IMicrophoneMuteStateInvalidationSource
 {
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
     private readonly IReadOnlyList<HyperXDeviceRegistration> _registrations;
+    private readonly bool _requiresVerifiedMicrophone;
     private readonly object _lifetimeLock = new();
     private readonly SemaphoreSlim _batteryQueryGate = new(1, 1);
     private IReadOnlyList<ReceiverCandidate> _available = Array.Empty<ReceiverCandidate>();
@@ -34,6 +35,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
             throw new ArgumentException("At least one receiver registration is required.", nameof(candidates));
         _modelName = modelName;
         _registrations = candidates;
+        _requiresVerifiedMicrophone = candidates.Any(r =>
+            r.Definition.VendorId == 0x03F0 && r.Definition.ProductId == 0x0A8E);
     }
 
     public string Name => _modelName;
@@ -44,9 +47,21 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     public bool IsCharging => Volatile.Read(ref _active)?.IsCharging == true;
     public bool IsMicrophoneMuted => Volatile.Read(ref _active)?.IsMicrophoneMuted == true;
     public bool IsMicrophoneMuteStateKnown => Volatile.Read(ref _active)?.IsMicrophoneMuteStateKnown == true;
-    public bool SupportsMicrophoneMuteMonitoring =>
-        Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
-        _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
+    public bool SupportsMicrophoneMuteMonitoring
+    {
+        get
+        {
+            if (_requiresVerifiedMicrophone)
+            {
+                IHyperXDevice? active = Volatile.Read(ref _active);
+                return _verified && active is { VendorId: 0x03F0, ProductId: 0x0A8E,
+                    SupportsMicrophoneMuteMonitoring: true } &&
+                    ReferenceEquals(active, Volatile.Read(ref _active));
+            }
+            return Volatile.Read(ref _active)?.SupportsMicrophoneMuteMonitoring ??
+                _registrations.Any(r => r.Definition.SupportsMicrophoneMuteMonitoring);
+        }
+    }
 
     public bool SupportsAutoPowerOff => _verified &&
         Volatile.Read(ref _active) is IAutoPowerOffDevice { SupportsAutoPowerOff: true };
@@ -82,6 +97,7 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     public event EventHandler<int>? BatteryChanged;
     public event EventHandler<bool>? ChargingChanged;
     public event EventHandler<bool>? MicrophoneMuteChanged;
+    public event EventHandler? MicrophoneMuteStateInvalidated;
 
     public bool Connect()
     {
@@ -302,6 +318,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         _active.BatteryChanged += Active_BatteryChanged;
         _active.ChargingChanged += Active_ChargingChanged;
         _active.MicrophoneMuteChanged += Active_MicrophoneMuteChanged;
+        if (_active is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated += Active_MicrophoneMuteStateInvalidated;
         ReceiverCandidate c = _available[index];
         if (c.IsDedicated)
             HidEndpointPreferenceStore.Remember(_modelName,
@@ -339,6 +357,12 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
             MicrophoneMuteChanged?.Invoke(this, muted);
     }
 
+    private void Active_MicrophoneMuteStateInvalidated(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(sender, Volatile.Read(ref _active)))
+            MicrophoneMuteStateInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
     private void ReleaseActive()
     {
         IHyperXDevice? old = Interlocked.Exchange(ref _active, null);
@@ -350,6 +374,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         old.BatteryChanged -= Active_BatteryChanged;
         old.ChargingChanged -= Active_ChargingChanged;
         old.MicrophoneMuteChanged -= Active_MicrophoneMuteChanged;
+        if (old is IMicrophoneMuteStateInvalidationSource mute)
+            mute.MicrophoneMuteStateInvalidated -= Active_MicrophoneMuteStateInvalidated;
         old.Dispose();
     }
 

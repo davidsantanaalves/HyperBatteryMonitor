@@ -72,6 +72,12 @@ public sealed class HyperXDeviceManager : IDisposable
             },
             new()
             {
+                Definition = CloudStingerCoreWirelessDevice.DtsDefinition,
+                Factory = () => new CloudStingerCoreWirelessDevice(
+                    CloudStingerCoreWirelessDevice.DtsDefinition)
+            },
+            new()
+            {
                 Definition = Cloud3WirelessAlternateReceiverDevice.Definition,
                 Factory = () => new Cloud3WirelessAlternateReceiverDevice()
             },
@@ -189,10 +195,16 @@ public sealed class HyperXDeviceManager : IDisposable
     }
 
     public static bool SupportsMicrophoneMuteMonitoring(
-        string? selectedDeviceName)
+        string? selectedDeviceName, IHyperXDevice? device = null)
     {
         HyperXDeviceRegistration? registration =
             FindRegistration(selectedDeviceName);
+
+        // The Stinger family mixes receivers with different capabilities.
+        // A model name alone must not advertise DTS-only microphone support.
+        if (IsSameDevice(selectedDeviceName, CloudStingerCoreWirelessDevice.DeviceDefinition.Name))
+            return device is ReceiverAwareDevice &&
+                IsSameDevice(selectedDeviceName, device.Name) && device.SupportsMicrophoneMuteMonitoring;
 
         return registration?.Definition.SupportsMicrophoneMuteMonitoring == true ||
             (TryGetReceiverFamily(selectedDeviceName, out string? group) &&
@@ -354,7 +366,8 @@ public sealed class HyperXDeviceManager : IDisposable
             ["HyperX Cloud Stinger Core Wireless + 7.1"] = new[]
             {
                 "HyperX Cloud Stinger Core Wireless + 7.1",
-                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)"
+                "HyperX Cloud Stinger Core Wireless + 7.1 (PlayStation)",
+                "HyperX Cloud Stinger Core Wireless DTS"
             }
         };
 
