@@ -1,5 +1,10 @@
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using HyperXBatteryTray;
 using HyperXBatteryTray.Devices;
+using HyperXBatteryTray.Monitoring;
+using HyperXBatteryTray.Notifications;
 using HyperXBatteryTray.Settings;
 
 internal static class Program
@@ -67,6 +72,148 @@ internal static class Program
             Console.WriteLine($"PASS {definition.Name}: {state}, supported={supported}, icon={(muteAsset ? "mute" : "mic")}, text={expected}");
             cases++;
         }
-        Console.WriteLine($"All {cases} UI cases passed.");
+        Console.WriteLine($"All {cases} original UI cases passed.");
+        ColdTrayStartsMuteBlink();
+        Console.WriteLine("PASS verified DTS starts mute-only tray blink and respects preferences");
+        NotificationsRefreshesMuteCapability();
+        Console.WriteLine("PASS Notifications refreshes in place and preserves mute preferences");
+        Console.WriteLine($"All {cases + 2} UI cases passed.");
+    }
+
+    private const string Model = "HyperX Cloud Stinger Core Wireless + 7.1";
+
+    private static void ColdTrayStartsMuteBlink()
+    {
+        foreach (bool mutePreference in new[] { true, false })
+        {
+            using var receiver = CreateUnverifiedDts(out var driver);
+            var settings = new AppSettings
+            {
+                SelectedDevice = Model,
+                Theme = AppTheme.Light,
+                BlinkOnCriticalBattery = false,
+                ShowMicrophoneMuteInSystray = mutePreference,
+                NotifyOnLowBattery = false,
+                NotifyWhenFullyCharged = false
+            };
+            using var notify = new NotifyIcon();
+            var context = CreateContext(settings, receiver, notify);
+            Call(context, "RestartBlinkTimer");
+            Check(Get(context, "_blinkTimer") == null, "unverified receiver started the timer");
+            try
+            {
+                Set(receiver, "_verified", true);
+                Call(context, "BatteryMonitor_ConnectionChanged", null, true);
+                Set(driver, "_isMicrophoneMuted", true);
+                Set(driver, "_isMicrophoneMuteStateKnown", true);
+                Call(context, "BatteryMonitor_MicrophoneMuteChanged", null, true);
+
+                var timer = Get(context, "_blinkTimer") as System.Windows.Forms.Timer;
+                Check((timer?.Enabled == true) == mutePreference, "mute-only timer disagrees with user preference");
+                if (mutePreference)
+                {
+                    Call(context, "BatteryMonitor_ConnectionChanged", null, true);
+                    Check(ReferenceEquals(timer, Get(context, "_blinkTimer")), "duplicate confirmation restarted the timer");
+                    PumpUntil(() => Equals(Get(context, "_blinkState"), true));
+                    PumpUntil(() => Equals(Get(context, "_blinkState"), false));
+                }
+
+                Set(receiver, "_verified", false);
+                Call(context, "BatteryMonitor_ConnectionChanged", null, false);
+                Check(Get(context, "_blinkTimer") == null, "timer survived loss of mute capability");
+            }
+            finally
+            {
+                (Get(context, "_blinkTimer") as IDisposable)?.Dispose();
+                (Get(context, "_currentApplicationIcon") as IDisposable)?.Dispose();
+            }
+        }
+    }
+
+    private static void NotificationsRefreshesMuteCapability()
+    {
+        foreach (bool saved in new[] { true, false })
+        {
+            using var receiver = CreateUnverifiedDts(out _);
+            var settings = new AppSettings { SelectedDevice = Model, ShowMicrophoneMuteInSystray = saved };
+            using var form = new SettingsForm(settings, receiver);
+            _ = form.Handle;
+            Call(form, "ShowPage", "Notifications");
+
+            var toggle = (Control)Get(form, "_showMicrophoneMuteInSystrayToggle")!;
+            var checkedProperty = toggle.GetType().GetProperty("Checked")!;
+            bool IsChecked() => (bool)checkedProperty.GetValue(toggle)!;
+            bool Pending() => (bool)Get(form, "_pendingShowMicrophoneMuteInSystray")!;
+            Check(!toggle.Enabled && !IsChecked() && Pending() == saved, "unverified Notifications state");
+
+            using var notify = new NotifyIcon();
+            var context = CreateContext(settings, receiver, notify);
+            Set(context, "_settingsForm", form);
+            try
+            {
+                Set(receiver, "_verified", true);
+                Call(context, "BatteryMonitor_ConnectionChanged", null, true);
+                Check(toggle.Enabled && IsChecked() == saved, "verification did not refresh the open page");
+
+                checkedProperty.SetValue(toggle, !saved);
+                Check(Pending() == !saved && settings.ShowMicrophoneMuteInSystray == saved, "edit was not pending");
+                Set(receiver, "_verified", false);
+                Call(context, "BatteryMonitor_ConnectionChanged", null, false);
+                Check(!toggle.Enabled && !IsChecked() && Pending() == !saved,
+                    "temporary loss of capability overwrote the pending choice");
+
+                Set(receiver, "_verified", true);
+                Call(context, "BatteryMonitor_ConnectionChanged", null, true);
+                Check(ReferenceEquals(toggle, Get(form, "_showMicrophoneMuteInSystrayToggle")) &&
+                    toggle.Enabled && IsChecked() == !saved && settings.ShowMicrophoneMuteInSystray == saved,
+                    "reverification lost the pending edit or rebuilt Notifications");
+            }
+            finally
+            {
+                (Get(context, "_blinkTimer") as IDisposable)?.Dispose();
+                (Get(context, "_currentApplicationIcon") as IDisposable)?.Dispose();
+            }
+        }
+    }
+
+    private static IHyperXDevice CreateUnverifiedDts(out CloudStingerCoreWirelessDevice driver)
+    {
+        object definition = typeof(CloudStingerCoreWirelessDevice)
+            .GetField("DtsDefinition", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        driver = (CloudStingerCoreWirelessDevice)Activator.CreateInstance(
+            typeof(CloudStingerCoreWirelessDevice), Instance, null, [definition], null)!;
+        Set(driver, "_isConnected", true);
+        Set(driver, "_battery", 80);
+        IHyperXDevice receiver = HyperXDeviceManager.CreateDevice(Model)!;
+        Set(receiver, "_active", driver);
+        return receiver;
+    }
+
+    private static HyperXBatteryMonitorApplicationContext CreateContext(
+        AppSettings settings, IHyperXDevice receiver, NotifyIcon notify)
+    {
+        // Use production handlers without starting HID monitoring, updater, or a visible tray icon.
+        var context = (HyperXBatteryMonitorApplicationContext)RuntimeHelpers.GetUninitializedObject(
+            typeof(HyperXBatteryMonitorApplicationContext));
+        Set(context, "_settings", settings);
+        Set(context, "_device", receiver);
+        Set(context, "_notifyIcon", notify);
+        Set(context, "_notificationService", new NotificationService());
+        Set(context, "_batteryRemainingTimeEstimator", new BatteryRemainingTimeEstimator(BatteryHistoryData.CreateCurrent()));
+        return context;
+    }
+
+    private static void Call(object target, string method, params object?[] args) =>
+        target.GetType().GetMethod(method, Instance)!.Invoke(target, args);
+
+    private static void PumpUntil(Func<bool> condition)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!condition() && watch.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
+        Check(condition(), "tray timer did not change phase");
     }
 }
