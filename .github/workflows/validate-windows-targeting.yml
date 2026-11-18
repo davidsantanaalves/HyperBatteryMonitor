@@ -1,0 +1,67 @@
+name: Validate Windows Targeting
+
+on:
+  pull_request:
+    paths:
+      - '**/*.csproj'
+      - '.github/workflows/validate-windows-targeting.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.csproj'
+      - '.github/workflows/validate-windows-targeting.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows-targeting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Windows projects support cross-platform restore
+        shell: python
+        run: |
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          errors = []
+          windows_projects = []
+          for path in sorted(Path(".").rglob("*.csproj")):
+              if any(part in ("obj", "bin", ".git") for part in path.parts):
+                  continue
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError as exc:
+                  errors.append(f"{path}: invalid XML: {exc}")
+                  continue
+              frameworks = [
+                  (node.text or "").strip()
+                  for node in root.iter()
+                  if node.tag.split("}")[-1] in ("TargetFramework", "TargetFrameworks")
+              ]
+              if not any("-windows" in framework.lower() for framework in frameworks):
+                  continue
+              windows_projects.append(str(path))
+              targeting_values = [
+                  (node.text or "").strip().lower()
+                  for node in root.iter()
+                  if node.tag.split("}")[-1] == "EnableWindowsTargeting"
+              ]
+              if "true" not in targeting_values:
+                  errors.append(
+                      f"{path}: Windows-targeted project must explicitly set "
+                      "<EnableWindowsTargeting>true</EnableWindowsTargeting>"
+                  )
+
+          print(f"Checked {len(windows_projects)} Windows-targeted project(s):")
+          for path in windows_projects:
+              print(f" - {path}")
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}")
+              sys.exit(1)
+          print("PASS: all Windows-targeted projects enable cross-platform restore.")
