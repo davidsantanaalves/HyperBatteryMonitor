@@ -181,7 +181,7 @@ public sealed partial class SettingsForm : Form
             Text = L("BetaDiagnosticsDialogTitle"),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.None,
-            ClientSize = new Size(S(680), S(542)),
+            ClientSize = new Size(S(680), S(715)),
             AutoScaleMode = AutoScaleMode.None,
             ShowInTaskbar = false,
             ShowIcon = false,
@@ -218,7 +218,7 @@ public sealed partial class SettingsForm : Form
         Panel canvas = new()
         {
             Location = Point.Empty,
-            Size = new Size(S(680), S(528)),
+            Size = new Size(S(680), S(710)),
             BackColor = background,
             Margin = new Padding(0)
         };
@@ -338,6 +338,30 @@ public sealed partial class SettingsForm : Form
         statusCard.Controls.Add(statusText);
         statusCard.Controls.Add(toggle);
 
+        RoundedPanel detailed = Card();
+        PngIconControl detailedIcon = Icon("diagnostics", 27);
+        Label detailedTitle = Text(L("BetaDiagnosticsDetailedTitle"), 10f, true);
+        Label detailedDescription = Text(L("BetaDiagnosticsDetailedDescription"), 8.3f, false, subtle);
+        Label detailedState = Text(string.Empty, 8.8f);
+        ActionButton startDetailed = Button(L("BetaDiagnosticsDetailedStart"), true);
+        ActionButton stopDetailed = Button(L("BetaDiagnosticsDetailedStop"), false);
+        detailed.Controls.Add(detailedIcon);
+        detailed.Controls.Add(detailedTitle);
+        detailed.Controls.Add(detailedDescription);
+        detailed.Controls.Add(detailedState);
+        detailed.Controls.Add(startDetailed);
+        detailed.Controls.Add(stopDetailed);
+
+        RoundedPanel storage = Card();
+        Panel storageIcon = OutlineGlyph(false);
+        Label storageTitle = Text(L("BetaDiagnosticsStorageTitle"), 10f, true);
+        Label storageUsage = Text(string.Empty, 8.9f, false, subtle);
+        ActionButton clearLogs = Button(L("BetaDiagnosticsClearLogs"), false);
+        storage.Controls.Add(storageIcon);
+        storage.Controls.Add(storageTitle);
+        storage.Controls.Add(storageUsage);
+        storage.Controls.Add(clearLogs);
+
         RoundedPanel privacy = Card();
         Panel privacyGlyph = OutlineGlyph(true);
         Label privacyText = Text(L("BetaDiagnosticsPrivacyText"), 8.6f);
@@ -398,33 +422,54 @@ public sealed partial class SettingsForm : Form
             introTitle.Bounds = new Rectangle(textLeft, S(8), textWidth, S(27));
             introDescription.Bounds = new Rectangle(textLeft, S(34), textWidth, S(34));
 
-            statusCard.Bounds = new Rectangle(left, S(150), cardWidth, S(50));
+            statusCard.Bounds = new Rectangle(left, S(148), cardWidth, S(53));
             statusText.Bounds = new Rectangle(S(19), S(8),
-                Math.Max(1, cardWidth - S(100)), S(34));
-            toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)), S(12),
+                Math.Max(1, cardWidth - S(100)), S(36));
+            toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)), S(14),
                 S(44), S(25));
 
-            privacy.Bounds = new Rectangle(left, S(208), cardWidth, S(87));
+            detailed.Bounds = new Rectangle(left, S(209), cardWidth, S(139));
+            detailedIcon.Bounds = new Rectangle(S(15), S(14), S(27), S(27));
+            detailedTitle.Bounds = new Rectangle(S(54), S(8),
+                Math.Max(1, cardWidth - S(74)), S(30));
+            detailedDescription.Bounds = new Rectangle(S(17), S(42),
+                Math.Max(1, cardWidth - S(34)), S(36));
+            detailedState.Bounds = new Rectangle(S(17), S(84),
+                Math.Max(1, cardWidth - S(245)), S(40));
+            startDetailed.Bounds = new Rectangle(Math.Max(S(8), cardWidth - S(214)),
+                S(91), S(195), S(34));
+            stopDetailed.Bounds = startDetailed.Bounds;
+
+            storage.Bounds = new Rectangle(left, S(356), cardWidth, S(78));
+            storageIcon.Bounds = new Rectangle(S(15), S(19), S(36), S(36));
+            storageTitle.Bounds = new Rectangle(S(63), S(8),
+                Math.Max(1, cardWidth - S(270)), S(30));
+            storageUsage.Bounds = new Rectangle(S(63), S(36),
+                Math.Max(1, cardWidth - S(270)), S(30));
+            clearLogs.Bounds = new Rectangle(Math.Max(S(8), cardWidth - S(183)),
+                S(23), S(164), S(34));
+
+            privacy.Bounds = new Rectangle(left, S(442), cardWidth, S(85));
             privacyGlyph.Bounds = new Rectangle(S(16), S(24), S(36), S(36));
-            privacyText.Bounds = new Rectangle(textLeft, S(9), textWidth, S(68));
+            privacyText.Bounds = new Rectangle(textLeft, S(9), textWidth, S(67));
 
-            retention.Bounds = new Rectangle(left, S(303), cardWidth, S(80));
-            retentionGlyph.Bounds = new Rectangle(S(16), S(21), S(36), S(36));
-            retentionText.Bounds = new Rectangle(textLeft, S(9), textWidth, S(62));
+            retention.Bounds = new Rectangle(left, S(535), cardWidth, S(69));
+            retentionGlyph.Bounds = new Rectangle(S(16), S(16), S(36), S(36));
+            retentionText.Bounds = new Rectangle(textLeft, S(7), textWidth, S(56));
 
-            actions.Bounds = new Rectangle(left, S(391), cardWidth, S(84));
-            actionsIcon.Bounds = new Rectangle(S(14), S(7), S(25), S(25));
-            actionsTitle.Bounds = new Rectangle(S(47), S(8),
-                Math.Max(1, cardWidth - S(58)), S(24));
+            actions.Bounds = new Rectangle(left, S(612), cardWidth, S(70));
+            actionsIcon.Bounds = new Rectangle(S(14), S(6), S(25), S(25));
+            actionsTitle.Bounds = new Rectangle(S(47), S(7),
+                Math.Max(1, cardWidth - S(58)), S(23));
             int buttonGap = S(12);
             int buttonPad = S(14);
             int buttonWidth = Math.Max(S(1), (cardWidth - 2 * buttonPad - buttonGap) / 2);
-            openLogs.Bounds = new Rectangle(buttonPad, S(41), buttonWidth, S(34));
-            close.Bounds = new Rectangle(buttonPad + buttonWidth + buttonGap, S(41),
-                Math.Max(1, cardWidth - (buttonPad + buttonWidth + buttonGap) - buttonPad), S(34));
+            openLogs.Bounds = new Rectangle(buttonPad, S(32), buttonWidth, S(32));
+            close.Bounds = new Rectangle(buttonPad + buttonWidth + buttonGap, S(32),
+                Math.Max(1, cardWidth - (buttonPad + buttonWidth + buttonGap) - buttonPad), S(32));
 
-            terms.Bounds = new Rectangle(left + S(5), S(489),
-                Math.Max(1, cardWidth - S(10)), S(28));
+            terms.Bounds = new Rectangle(left + S(5), S(686),
+                Math.Max(1, cardWidth - S(10)), S(24));
         }
         viewport.SizeChanged += (_, _) => LayoutDiagnostics();
         LayoutDiagnostics();
@@ -459,6 +504,17 @@ public sealed partial class SettingsForm : Form
         modal.CancelButton = close;
 
 
+        void UpdateStorage()
+        {
+            var (files, bytes) = BetaDiagnostics.GetStorageUsage();
+            string megabytes = (bytes / (1024d * 1024d)).ToString("0.0",
+                System.Globalization.CultureInfo.CurrentCulture);
+            storageUsage.Text = string.Format(L("BetaDiagnosticsStorageUsage"), files, megabytes);
+            clearLogs.Enabled = files > 0;
+        }
+
+        using System.Windows.Forms.Timer captureStatusTimer = new() { Interval = 1000 };
+        bool maintenanceBusy = false;
         bool handling = false;
         void ShowState()
         {
@@ -472,7 +528,129 @@ public sealed partial class SettingsForm : Form
                 toggle.Checked = active;
                 handling = false;
             }
+            DateTimeOffset? ends = BetaDiagnostics.DetailedCaptureEndsAtUtc;
+            bool detailedActive = active && ends.HasValue;
+            startDetailed.Visible = !detailedActive;
+            startDetailed.Enabled = active && !detailedActive && !maintenanceBusy;
+            stopDetailed.Visible = detailedActive;
+            stopDetailed.Enabled = detailedActive && !maintenanceBusy;
+            toggle.Enabled = !maintenanceBusy;
+            detailedState.Text = detailedActive
+                ? string.Format(L("BetaDiagnosticsDetailedRemaining"),
+                    Math.Max(1, (int)Math.Ceiling((ends!.Value - DateTimeOffset.UtcNow).TotalMinutes)))
+                : L("BetaDiagnosticsDetailedInactive");
         }
+        startDetailed.Click += (_, _) =>
+        {
+            if (!BetaDiagnostics.IsEnabled) return;
+            using Form durationModal = new()
+            {
+                Text = L("BetaDiagnosticsDurationTitle"),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.None,
+                ClientSize = new Size(S(430), S(212)),
+                AutoScaleMode = AutoScaleMode.None,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                BackColor = background,
+                ForeColor = fg,
+                Font = new Font("Segoe UI", 9f)
+            };
+            Label prompt = Text(L("BetaDiagnosticsDurationPrompt"), 9f, false);
+            prompt.Bounds = new Rectangle(S(20), S(16), S(390), S(48));
+            durationModal.Controls.Add(prompt);
+            ComboBox durations = new()
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10f),
+                BackColor = cardFill,
+                ForeColor = fg,
+                Bounds = new Rectangle(S(20), S(77), S(390), S(34))
+            };
+            int[] allowedHours = { 1, 3, 6, 12, 24 };
+            foreach (int hours in allowedHours)
+                durations.Items.Add(string.Format(L("BetaDiagnosticsDurationHours"), hours));
+            durations.SelectedIndex = 0;
+            durationModal.Controls.Add(durations);
+            Label privacyNote = Text(L("BetaDiagnosticsDetailedPrivacyNote"), 8.2f, false, subtle);
+            privacyNote.Bounds = new Rectangle(S(20), S(118), S(390), S(34));
+            durationModal.Controls.Add(privacyNote);
+            Button begin = new()
+            {
+                Text = L("BetaDiagnosticsDetailedStart"),
+                Bounds = new Rectangle(S(242), S(162), S(168), S(32)),
+                BackColor = dark ? Color.FromArgb(35, 99, 132) : Color.FromArgb(221, 241, 252),
+                ForeColor = fg,
+                FlatStyle = FlatStyle.Flat,
+                DialogResult = DialogResult.None
+            };
+            begin.FlatAppearance.BorderSize = 0;
+            Button cancelDuration = new()
+            {
+                Text = L("Cancel"),
+                Bounds = new Rectangle(S(102), S(162), S(126), S(32)),
+                BackColor = cardFill,
+                ForeColor = fg,
+                FlatStyle = FlatStyle.Flat,
+                DialogResult = DialogResult.Cancel
+            };
+            cancelDuration.FlatAppearance.BorderSize = 0;
+            durationModal.Controls.Add(cancelDuration);
+            durationModal.CancelButton = cancelDuration;
+            durationModal.SizeChanged += (_, _) =>
+            {
+                durationModal.Region?.Dispose();
+                using GraphicsPath rounded = GraphicsExtensions.CreateRoundedPath(
+                    new RectangleF(0.5f, 0.5f, Math.Max(1, durationModal.Width - 1f),
+                        Math.Max(1, durationModal.Height - 1f)), S(10));
+                durationModal.Region = new Region(rounded);
+            };
+            begin.Click += (_, _) =>
+            {
+                if (BetaDiagnostics.StartDetailedCapture(allowedHours[durations.SelectedIndex]))
+                {
+                    durationModal.DialogResult = DialogResult.OK;
+                    durationModal.Close();
+                }
+            };
+            durationModal.Controls.Add(begin);
+            durationModal.AcceptButton = begin;
+            durationModal.ShowDialog(modal);
+            ShowState();
+        };
+        stopDetailed.Click += (_, _) =>
+        {
+            BetaDiagnostics.StopDetailedCapture();
+            ShowState();
+        };
+        clearLogs.Click += async (_, _) =>
+        {
+            if (MessageBox.Show(modal, L("BetaDiagnosticsClearConfirm"),
+                L("BetaDiagnosticsClearLogs"), MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+            maintenanceBusy = true;
+            clearLogs.Enabled = false;
+            toggle.Enabled = false;
+            startDetailed.Enabled = false;
+            stopDetailed.Enabled = false;
+            bool success;
+            try { success = await BetaDiagnostics.ClearLogsAsync(); }
+            catch { success = false; }
+            finally { maintenanceBusy = false; }
+            if (modal.IsDisposed) return;
+            UpdateStorage();
+            ShowState();
+            MessageBox.Show(modal,
+                L(success ? "BetaDiagnosticsClearSuccess" : "BetaDiagnosticsClearFailure"),
+                L("BetaDiagnosticsDialogTitle"), MessageBoxButtons.OK,
+                success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        };
+        captureStatusTimer.Tick += (_, _) => ShowState();
+        modal.Shown += (_, _) => captureStatusTimer.Start();
+        modal.FormClosed += (_, _) => captureStatusTimer.Stop();
         toggle.CheckedChanged += (_, _) =>
         {
             if (handling) return;
@@ -516,6 +694,7 @@ public sealed partial class SettingsForm : Form
             ShowState();
         };
         ShowState();
+        UpdateStorage();
         modal.Shown += (_, _) =>
         {
             Rectangle bounds = Screen.FromControl(modal).WorkingArea;
