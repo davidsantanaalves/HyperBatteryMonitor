@@ -17,6 +17,8 @@ public sealed partial class SettingsForm : Form
     private IHyperXDevice? _runtimeDevice;
     private bool _runtimeIsCharging;
     private BatteryMonitor? _devicePreviewMonitor;
+    // Read-only estimate for a newly selected device before Apply/OK.
+    private BatteryRemainingTimeEstimator? _devicePreviewRemainingTimeEstimator;
 
     private void DeviceSelector_SelectionChanged(object? sender, EventArgs e)
     {
@@ -48,6 +50,8 @@ public sealed partial class SettingsForm : Form
         if (previewDevice == null)
             return;
 
+        _devicePreviewRemainingTimeEstimator ??= new BatteryRemainingTimeEstimator(
+            new SettingsManager().LoadBatteryHistory());
         BatteryMonitor previewMonitor = new(previewDevice, GetPendingDeviceMonitoringMode());
 
         previewMonitor.BatteryChanged += DevicePreviewMonitor_BatteryChanged;
@@ -62,6 +66,10 @@ public sealed partial class SettingsForm : Form
 
     private void StopDevicePreview()
     {
+        // Stop any outstanding one-shot read before disposing the preview device.
+        if (_devicePreviewMonitor != null && ReferenceEquals(_device, _autoPowerOffIdentity))
+            InvalidateAutoPowerOffForDeviceChange();
+
         if (_devicePreviewMonitor != null)
         {
             _devicePreviewMonitor.BatteryChanged -= DevicePreviewMonitor_BatteryChanged;
@@ -160,6 +168,16 @@ public sealed partial class SettingsForm : Form
     {
         bool selected = _deviceSelector.SelectedIndex > 0;
         bool connected = selected && _device?.IsConnected == true && _device.Battery >= 0 && _device.Battery <= 100;
+
+        if (_devicePreviewMonitor != null)
+        {
+            // Reuse the same estimator rules as the running monitor, but do not
+            // mutate the active device's discharge-history learning session.
+            _batteryRemainingTime = _device is BluetoothFallbackDevice fallback && fallback.IsUsingBluetooth
+                ? null
+                : _devicePreviewRemainingTimeEstimator?.EstimateRemaining(
+                    _pendingSelectedDevice, _device?.Battery ?? -1, connected, _isCharging);
+        }
 
         // The main Device page no longer displays the legacy status card.
         // Keep these updates conditional so device selection/status refreshes

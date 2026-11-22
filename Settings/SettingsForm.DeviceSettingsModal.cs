@@ -112,9 +112,13 @@ public sealed partial class SettingsForm
             }
         }
 
-        // A fresh modal must never reuse a current value from an older connection.
-        // Verified history remains available separately for disconnected display.
-        InvalidateAutoPowerOffForDeviceChange();
+        // Preserve a verified value (or an in-flight read) for this exact
+        // connected preview session. RefreshAutoPowerOffState resets it when
+        // device identity/model or the verified connection changes.
+        if (_devicePreviewMonitor == null ||
+            !ReferenceEquals(_device, _autoPowerOffIdentity) ||
+            !string.Equals(_pendingSelectedDevice, _autoPowerOffModel, StringComparison.Ordinal))
+            InvalidateAutoPowerOffForDeviceChange();
         using DeviceSettingsDialog dialog = new(this, eligible, savedMode, SaveAsync);
         _activeDeviceSettingsDialog = dialog;
         dialog.AutoPowerOffSelected += SelectAutoPowerOff;
@@ -127,7 +131,10 @@ public sealed partial class SettingsForm
         }
         finally
         {
-            CancelAutoPowerOffRead();
+            // Preview reads also populate the sidebar. Do not cancel that
+            // in-flight one-shot query merely because the modal was closed.
+            if (_devicePreviewMonitor == null)
+                CancelAutoPowerOffRead();
             _activeDeviceSettingsDialog = null;
             // Discard cancelled UI-only changes. Never write hardware on close.
             _autoPowerOffPending = _autoPowerOffCurrent;

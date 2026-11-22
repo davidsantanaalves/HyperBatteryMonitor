@@ -55,8 +55,12 @@ public sealed partial class SettingsForm
 
     private void RefreshAutoPowerOffState()
     {
-        if (_currentPage != "Device" || _activeDeviceSettingsDialog is null ||
-            _activeDeviceSettingsDialog.IsDisposed) return;
+        // During device selection, load the verified value for the sidebar
+        // even when the separate Device Settings modal has not been opened.
+        // The committed runtime device is still managed by ApplicationContext.
+        if (_currentPage != "Device" ||
+            (_devicePreviewMonitor == null &&
+             (_activeDeviceSettingsDialog is null || _activeDeviceSettingsDialog.IsDisposed))) return;
 
         if (!ReferenceEquals(_device, _autoPowerOffIdentity) ||
             !string.Equals(_pendingSelectedDevice, _autoPowerOffModel, StringComparison.Ordinal))
@@ -209,10 +213,14 @@ public sealed partial class SettingsForm
                 System.Diagnostics.Debug.WriteLine($"Could not persist verified Auto Power-Off: {ex.Message}");
             }
         }
-        if (!ReferenceEquals(identity, _runtimeDevice)) return;
-        _settings.RuntimeAutoPowerOffMinutes = value;
+        if (ReferenceEquals(identity, _runtimeDevice))
+        {
+            _settings.RuntimeAutoPowerOffMinutes = value;
+            DeviceAutoPowerOffSnapshotChanged?.Invoke(this, EventArgs.Empty);
+        }
+        // A preview device has no runtime snapshot yet. Refresh its sidebar
+        // from this verified read, without committing the selected device.
         RefreshRuntimeStatusSummary();
-        DeviceAutoPowerOffSnapshotChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowAutoPowerOffError()
