@@ -24,10 +24,38 @@ internal static class BetaDiagnostics
     private static Task? _worker;
     private static long _detailedUntilUtcTicks;
     private static long _droppedEntries;
+    private static System.Threading.Timer? _detailedDeadlineTimer;
+    private static int _detailedDurationHours;
+    private static bool _essentialLoggingEnabled;
+    private const int CaptureSessionSchemaVersion = 1;
+    private const string CaptureSessionFileName = "detailed-capture-session.json";
+
+    // This file holds only the session deadline and consent revision, not HID data
+    // or any persistent change to essential diagnostics preferences.
+    private sealed class CaptureSessionState
+    {
+        public CaptureSessionState() { }
+
+        public int SchemaVersion { get; set; }
+        public int ConsentVersion { get; set; }
+        public int DurationHours { get; set; }
+        public long StartedUtcTicks { get; set; }
+        public long DeadlineUtcTicks { get; set; }
+    }
+
+    private static string CaptureSessionPath => Path.Combine(
+        ApplicationRuntime.UserDataDirectory, CaptureSessionFileName);
+
+    internal enum DetailedCaptureTransition { Started, Resumed, Completed, Stopped }
+    internal static event Action<DetailedCaptureTransition, int>? DetailedCaptureTransitioned;
 
     private readonly record struct LogEntry(string Json, bool Immediate);
 
     internal static bool IsEnabled => Volatile.Read(ref _channel) != null;
+    internal static bool IsEssentialLoggingEnabled
+    {
+        get { lock (Gate) return _essentialLoggingEnabled && _channel != null; }
+    }
     internal static string LogsFolder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "HBM Logs");
 
@@ -40,7 +68,9 @@ internal static class BetaDiagnostics
             if (until == 0) return null;
             if (until <= DateTimeOffset.UtcNow.UtcTicks)
             {
-                Interlocked.CompareExchange(ref _detailedUntilUtcTicks, 0, until);
+                // The deadline can be observed while Settings is open, or by the
+                // one-shot timer when the dialog has already closed. Complete once.
+                CompleteDetailedCaptureIfDue(until);
                 return null;
             }
             return new DateTimeOffset(until, TimeSpan.Zero);
@@ -49,46 +79,308 @@ internal static class BetaDiagnostics
 
     internal static bool IsDetailedCaptureActive => IsEnabled && DetailedCaptureEndsAtUtc.HasValue;
 
-    internal static bool StartDetailedCapture(int durationHours)
+    internal static bool StartDetailedCapture(int durationHours, bool allowTemporary = false)
     {
-        if (durationHours is < 1 or > 24 || !IsEnabled) return false;
-        Interlocked.Exchange(ref _detailedUntilUtcTicks,
-            DateTimeOffset.UtcNow.AddHours(durationHours).UtcTicks);
+        if (durationHours is < 1 or > 24) return false;
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+        long deadlineUtcTicks = startedAt.AddHours(durationHours).UtcTicks;
+        bool stopUnusedWriter = false;
+        bool started = false;
+        lock (Gate)
+        {
+            // Temporary consent starts the writer without enabling essential logging.
+            bool writerWasDormant = _channel == null;
+            if (writerWasDormant && allowTemporary)
+                StartWriterUnderLock();
+            if (_channel == null) return false;
+
+            // Persist before enabling raw HID capture. If this fails, the user
+            // receives the existing start-failure dialog, not a false promise
+            // that the session will survive a restart.
+            CaptureSessionState session = new()
+            {
+                SchemaVersion = CaptureSessionSchemaVersion,
+                ConsentVersion = ConsentVersion,
+                DurationHours = durationHours,
+                StartedUtcTicks = startedAt.UtcTicks,
+                DeadlineUtcTicks = deadlineUtcTicks
+            };
+            if (!TrySaveCaptureSession(session))
+            {
+                stopUnusedWriter = writerWasDormant && !_essentialLoggingEnabled &&
+                    Interlocked.Read(ref _detailedUntilUtcTicks) == 0;
+            }
+            else
+            {
+                ScheduleDetailedDeadlineUnderLock(deadlineUtcTicks);
+                Interlocked.Exchange(ref _detailedUntilUtcTicks, deadlineUtcTicks);
+                _detailedDurationHours = durationHours;
+                started = true;
+            }
+        }
+        if (stopUnusedWriter) Stop();
+        if (!started) return false;
         Write("Diagnostics.DetailedCaptureStarted", new { DurationHours = durationHours });
+        NotifyDetailedCaptureTransition(DetailedCaptureTransition.Started, durationHours);
         return true;
+    }
+
+    /// <summary>
+    /// Rehydrate a still-authorized session on a new HBM process, preserving the
+    /// original UTC deadline. Expired, malformed or outdated consent state is
+    /// discarded without resuming raw diagnostics or sending a completion toast.
+    /// </summary>
+    internal static bool TryResumeDetailedCapture()
+    {
+        int durationHours;
+        long deadlineUtcTicks;
+        lock (Gate)
+        {
+            if (Interlocked.Read(ref _detailedUntilUtcTicks) != 0)
+                return false;
+
+            CaptureSessionState? session = TryLoadCaptureSession();
+            if (session == null) return false;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if (!IsValidCaptureSession(session, now))
+            {
+                DeletePersistedCaptureSession();
+                return false;
+            }
+
+            // The session-specific, previously granted authorization is bounded
+            // by the original deadline; it never changes the saved consent toggle.
+            if (_channel == null)
+                StartWriterUnderLock();
+            if (_channel == null) return false;
+
+            durationHours = session.DurationHours;
+            deadlineUtcTicks = session.DeadlineUtcTicks;
+            ScheduleDetailedDeadlineUnderLock(deadlineUtcTicks);
+            Interlocked.Exchange(ref _detailedUntilUtcTicks, deadlineUtcTicks);
+            _detailedDurationHours = durationHours;
+        }
+        Write("Diagnostics.DetailedCaptureResumed", new
+        {
+            DurationHours = durationHours,
+            RemainingMinutes = Math.Max(1, (int)Math.Ceiling(
+                (deadlineUtcTicks - DateTimeOffset.UtcNow.UtcTicks) /
+                (double)TimeSpan.TicksPerMinute))
+        });
+        NotifyDetailedCaptureTransition(DetailedCaptureTransition.Resumed, durationHours);
+        return true;
+    }
+
+    private static bool IsValidCaptureSession(CaptureSessionState session, DateTimeOffset now)
+    {
+        return session.SchemaVersion == CaptureSessionSchemaVersion &&
+            session.ConsentVersion == ConsentVersion &&
+            session.DurationHours is >= 1 and <= 24 &&
+            session.StartedUtcTicks > 0 &&
+            session.StartedUtcTicks <= now.UtcTicks &&
+            session.DeadlineUtcTicks > now.UtcTicks &&
+            session.DeadlineUtcTicks - session.StartedUtcTicks ==
+                TimeSpan.FromHours(session.DurationHours).Ticks;
+    }
+
+    private static CaptureSessionState? TryLoadCaptureSession()
+    {
+        try
+        {
+            string path = CaptureSessionPath;
+            if (!File.Exists(path)) return null;
+            return JsonSerializer.Deserialize<CaptureSessionState>(File.ReadAllText(path));
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Could not read detailed capture session: {ex.GetType().Name}");
+            return null;
+        }
+    }
+
+    // Called while holding Gate. Writes once per session, not per monitoring event.
+    private static bool TrySaveCaptureSession(CaptureSessionState session)
+    {
+        string? temporaryFile = null;
+        try
+        {
+            string path = CaptureSessionPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            temporaryFile = path + ".tmp";
+            File.WriteAllText(temporaryFile, JsonSerializer.Serialize(session));
+            File.Move(temporaryFile, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Could not persist detailed capture session: {ex.GetType().Name}");
+            return false;
+        }
+        finally
+        {
+            if (temporaryFile != null)
+            {
+                try { File.Delete(temporaryFile); } catch { }
+            }
+        }
+    }
+
+    private static void DeletePersistedCaptureSession()
+    {
+        try { File.Delete(CaptureSessionPath); }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Could not clear detailed capture session: {ex.GetType().Name}");
+            // A corrupted/inaccessible record must never authorize a new session.
+            // If deletion fails, attempt to replace it with an invalid record.
+            try { File.WriteAllText(CaptureSessionPath, "{}"); } catch { }
+        }
     }
 
     internal static void StopDetailedCapture()
     {
-        if (Interlocked.Exchange(ref _detailedUntilUtcTicks, 0) != 0)
+        bool stopped;
+        bool endTemporaryWriter;
+        lock (Gate)
+        {
+            stopped = Interlocked.Exchange(ref _detailedUntilUtcTicks, 0) != 0;
+            endTemporaryWriter = !_essentialLoggingEnabled;
+            _detailedDurationHours = 0;
+            _detailedDeadlineTimer?.Dispose();
+            _detailedDeadlineTimer = null;
+            if (stopped) DeletePersistedCaptureSession();
+        }
+        if (stopped)
+        {
             Write("Diagnostics.DetailedCaptureStopped");
+            NotifyDetailedCaptureTransition(DetailedCaptureTransition.Stopped, 0);
+            if (endTemporaryWriter) Stop();
+        }
+        // A manual stop must not produce the scheduled-completion notification.
+    }
+
+    private static void ScheduleDetailedDeadlineUnderLock(long deadlineUtcTicks)
+    {
+        TimeSpan remaining = TimeSpan.FromTicks(Math.Max(TimeSpan.TicksPerMillisecond,
+            deadlineUtcTicks - DateTimeOffset.UtcNow.UtcTicks));
+        System.Threading.Timer timer = new(OnDetailedDeadlineReached, deadlineUtcTicks,
+            remaining, Timeout.InfiniteTimeSpan);
+        System.Threading.Timer? old = _detailedDeadlineTimer;
+        _detailedDeadlineTimer = timer;
+        old?.Dispose();
+    }
+
+    private static void OnDetailedDeadlineReached(object? state)
+    {
+        if (state is long deadlineUtcTicks)
+            _ = CompleteDetailedDeadlineAfterMaintenanceAsync(deadlineUtcTicks);
+    }
+
+    private static async Task CompleteDetailedDeadlineAfterMaintenanceAsync(long deadlineUtcTicks)
+    {
+        bool entered = false;
+        try
+        {
+            // Clearing logs temporarily pauses the writer. Defer expiry until
+            // the session has been restored, preserving the completion toast.
+            await MaintenanceGate.WaitAsync().ConfigureAwait(false);
+            entered = true;
+            CompleteDetailedCaptureIfDue(deadlineUtcTicks);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Detailed diagnostics deadline notification failed: {ex.GetType().Name}");
+        }
+        finally
+        {
+            if (entered) MaintenanceGate.Release();
+        }
+    }
+
+    private static void CompleteDetailedCaptureIfDue(long expectedDeadlineUtcTicks)
+    {
+        int completedDurationHours;
+        bool endTemporaryWriter;
+        lock (Gate)
+        {
+            if (_channel == null || Interlocked.Read(ref _detailedUntilUtcTicks) != expectedDeadlineUtcTicks)
+                return;
+            if (DateTimeOffset.UtcNow.UtcTicks < expectedDeadlineUtcTicks)
+            {
+                // A system-clock adjustment can make a one-shot timer fire early.
+                ScheduleDetailedDeadlineUnderLock(expectedDeadlineUtcTicks);
+                return;
+            }
+            Interlocked.Exchange(ref _detailedUntilUtcTicks, 0);
+            completedDurationHours = _detailedDurationHours;
+            endTemporaryWriter = !_essentialLoggingEnabled;
+            _detailedDurationHours = 0;
+            _detailedDeadlineTimer?.Dispose();
+            _detailedDeadlineTimer = null;
+            DeletePersistedCaptureSession();
+        }
+        Write("Diagnostics.DetailedCaptureCompleted", new { DurationHours = completedDurationHours });
+        NotifyDetailedCaptureTransition(DetailedCaptureTransition.Completed, completedDurationHours);
+        if (endTemporaryWriter) Stop();
+    }
+
+    private static void NotifyDetailedCaptureTransition(DetailedCaptureTransition transition,
+        int durationHours)
+    {
+        try { DetailedCaptureTransitioned?.Invoke(transition, durationHours); }
+        catch (Exception ex)
+        {
+            // Notification failures must never affect diagnostics or HID monitoring.
+            Debug.WriteLine($"Diagnostics toast dispatch unavailable: {ex.GetType().Name}");
+        }
     }
 
     internal static void Start()
     {
         lock (Gate)
         {
-            if (_channel != null) return;
-            try
+            StartWriterUnderLock();
+            // Starting essential logging is the only operation that enables its
+            // persistent in-memory mode. Temporary capture never changes settings.
+            _essentialLoggingEnabled = _channel != null;
+        }
+    }
+
+    internal static void DisableEssentialLogging()
+    {
+        lock (Gate)
+        {
+            _essentialLoggingEnabled = false;
+            // An already-authorized temporary capture must finish normally.
+            // The writer is stopped when that session expires or is cancelled.
+            if (Interlocked.Read(ref _detailedUntilUtcTicks) == 0)
+                Stop();
+        }
+    }
+
+    // Gate must be held by the caller. Never changes the essential preference.
+    private static void StartWriterUnderLock()
+    {
+        if (_channel != null) return;
+        try
+        {
+            string folder = LogsFolder;
+            Directory.CreateDirectory(folder);
+            Prune(folder);
+            Channel<LogEntry> channel = Channel.CreateBounded<LogEntry>(new BoundedChannelOptions(4096)
             {
-                string folder = LogsFolder;
-                Directory.CreateDirectory(folder);
-                Prune(folder);
-                Channel<LogEntry> channel = Channel.CreateBounded<LogEntry>(new BoundedChannelOptions(4096)
-                {
-                    FullMode = BoundedChannelFullMode.Wait,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
-                _channel = channel;
-                _worker = Task.Run(() => WriteLoopAsync(folder, channel.Reader));
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Local diagnostics unavailable: {ex.GetType().Name}");
-                _channel = null;
-                _worker = null;
-            }
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = false
+            });
+            _channel = channel;
+            _worker = Task.Run(() => WriteLoopAsync(folder, channel.Reader));
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Local diagnostics unavailable: {ex.GetType().Name}");
+            _channel = null;
+            _worker = null;
         }
     }
 
@@ -97,7 +389,8 @@ internal static class BetaDiagnostics
         return eventName is "UI.UnhandledException" or "Process.UnhandledException"
             or "Task.UnobservedException" or "Monitor.UnhandledCycleError"
             or "Diagnostics.EntriesDropped" or "Diagnostics.DetailedCaptureStopped"
-            or "Diagnostics.DetailedCaptureStarted"
+            or "Diagnostics.DetailedCaptureStarted" or "Diagnostics.DetailedCaptureResumed"
+            or "Diagnostics.DetailedCaptureCompleted"
             || (eventName.EndsWith("Failed", StringComparison.Ordinal) &&
                 eventName is not "Monitor.BatteryQueryFailed");
     }
@@ -106,7 +399,8 @@ internal static class BetaDiagnostics
     {
         if (!IsEssentialEvent(eventName)) return false;
         // Repeated exceptions and HID-open failures must not produce a new disk entry every cycle.
-        if (eventName is "Diagnostics.DetailedCaptureStarted" or "Diagnostics.DetailedCaptureStopped")
+        if (eventName is "Diagnostics.DetailedCaptureStarted" or "Diagnostics.DetailedCaptureResumed"
+            or "Diagnostics.DetailedCaptureStopped" or "Diagnostics.DetailedCaptureCompleted")
             return true;
         lock (EssentialGate)
         {
@@ -294,9 +588,13 @@ internal static class BetaDiagnostics
             {
                 if (resume)
                 {
-                    Start();
-                    if (IsEnabled && detailedUntil > DateTimeOffset.UtcNow.UtcTicks)
+                    lock (Gate) StartWriterUnderLock();
+                    if (IsEnabled && detailedUntil != 0)
+                    {
                         Interlocked.Exchange(ref _detailedUntilUtcTicks, detailedUntil);
+                        if (detailedUntil <= DateTimeOffset.UtcNow.UtcTicks)
+                            CompleteDetailedCaptureIfDue(detailedUntil);
+                    }
                 }
             }
             return success;
@@ -337,7 +635,11 @@ internal static class BetaDiagnostics
             worker = _worker;
             _channel = null;
             _worker = null;
+            _essentialLoggingEnabled = false;
             Interlocked.Exchange(ref _detailedUntilUtcTicks, 0);
+            _detailedDurationHours = 0;
+            _detailedDeadlineTimer?.Dispose();
+            _detailedDeadlineTimer = null;
         }
         channel?.Writer.TryComplete();
         try { worker?.Wait(TimeSpan.FromSeconds(2)); } catch { }

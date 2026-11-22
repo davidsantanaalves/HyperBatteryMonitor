@@ -1,19 +1,21 @@
-﻿# Hyper Battery Monitor v2.4.0-beta.4 - guarded GitHub prerelease publication.
+﻿# Hyper Battery Monitor v2.5.0-beta.4 - guarded GitHub prerelease publication.
+# -ValidateOnly performs local source/version checks without build, installer or network.
 # Usage: .\Release\Publish-Beta4.ps1             (validate/build only)
 #        .\Release\Publish-Beta4.ps1 -Publish    (validate/build/publish after confirmation)
 [CmdletBinding()]
-param([switch]$Publish)
+param([switch]$Publish, [switch]$ValidateOnly)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($Publish -and $ValidateOnly) { throw '-Publish and -ValidateOnly cannot be combined.' }
 
 $root = Split-Path -Parent $PSScriptRoot
 $repo = 'davidsantanaalves/HyperBatteryMonitor'
-$branch = 'develop/v2.4.0'
-$tag = 'v2.4.0-beta.4'
-$setupName = 'HyperBatteryMonitor-Setup-v2.4.0-beta.4.exe'
+$branch = 'develop/v2.5.0'
+$tag = 'v2.5.0-beta.4'
+$setupName = 'HyperBatteryMonitor-Setup-v2.5.0-beta.4.exe'
 $setupPath = Join-Path $root ('Releases\' + $setupName)
-$notesPath = Join-Path $root 'Release\ReleaseNotes-v2.4.0-beta.4.md'
+$notesPath = Join-Path $root 'Release\ReleaseNotes-v2.5.0-beta.4.md'
 $projectPath = Join-Path $root 'HyperXBatteryMonitor.csproj'
 
 function Run-Native {
@@ -45,9 +47,9 @@ try {
     if ($versionNodes.Count -ne 1 -or $channelNodes.Count -ne 1 -or $betaNodes.Count -ne 1) {
         throw 'Expected exactly one nonempty Version, ReleaseChannel and BetaNumber property in the project.'
     }
-    if ($versionNodes[0] -cne '2.4.0' -or
+    if ($versionNodes[0] -cne '2.5.0' -or
         $channelNodes[0] -cne 'Beta' -or $betaNodes[0] -cne '4') {
-        throw 'Expected csproj: Version=2.4.0; ReleaseChannel=Beta; BetaNumber=4.'
+        throw 'Expected csproj: Version=2.5.0; ReleaseChannel=Beta; BetaNumber=4.'
     }
     if (-not (Test-Path -LiteralPath $notesPath)) { throw "Missing release notes: $notesPath" }
     $notes = Get-Content -LiteralPath $notesPath -Raw
@@ -77,13 +79,34 @@ try {
         throw 'Beta 4 adaptive HID resolver is missing or not the expected implementation.'
     }
 
+    foreach ($required in @('Settings/SettingsForm.DeviceSettingsModal.cs', 'Settings/AppSettings.cs',
+        'Settings/SettingsForm.AutoPowerOff.cs', 'Monitoring/BatteryMonitor.cs',
+        'Devices/CloudStingerCoreWirelessDevice.cs', 'Devices/IMicrophoneMuteStateInvalidationSource.cs',
+        'Tests/StingerCore/StingerCore.Tests.csproj', 'Tests/StingerCoreUi/StingerCoreUi.Tests.csproj')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw "Missing Beta 4 component: $required" }
+    }
+    $dtsSource = Get-Content -LiteralPath (Join-Path $root 'Devices/CloudStingerCoreWirelessDevice.cs') -Raw
+    if (-not $dtsSource.Contains('DtsDefinition') -or -not $dtsSource.Contains('ParseDtsMicrophoneReport')) {
+        throw 'Published Beta 3 DTS support is missing.'
+    }
+    if ($ValidateOnly) {
+        Write-Host 'LOCAL SOURCE VALIDATION PASSED: v2.5.0-beta.4; nothing built or published.'
+        return
+    }
+
     # Every critical Beta 4 component must be tracked in the release commit,
     # not merely exist as untracked files in the working directory.
     foreach ($trackedPath in @(
+        'Settings/SettingsForm.DeviceSettingsModal.cs',
+        'Settings/AppSettings.cs',
+        'Monitoring/BatteryMonitor.cs',
+        'Devices/IMicrophoneMuteStateInvalidationSource.cs',
+        'Tests/StingerCore/StingerCore.Tests.csproj',
+        'Tests/StingerCoreUi/StingerCoreUi.Tests.csproj',
         'Settings/ThemedVerticalScrollBar.cs',
         'Settings/UpdateReleaseNotesDialog.cs',
         'Updates/UpdateChannelPolicy.cs',
-        'Release/ReleaseNotes-v2.4.0-beta.4.md',
+        'Release/ReleaseNotes-v2.5.0-beta.4.md',
         'Release/Publish-Beta4.ps1',
         'Devices/HidEndpointPreferenceStore.cs',
         'Devices/ISelectableHidEndpoint.cs',
@@ -136,6 +159,12 @@ try {
     Write-Host "Verified HEAD: $sha" -ForegroundColor Cyan
     Write-Host "Building $tag ..." -ForegroundColor Cyan
     Run-Native 'dotnet build Release' { dotnet build .\HyperXBatteryMonitor.csproj -c Release }
+    Run-Native 'DTS driver regressions' {
+        dotnet run --project .\Tests\StingerCore\StingerCore.Tests.csproj -c Release
+    }
+    Run-Native 'DTS UI and Beta 4 contracts' {
+        dotnet run --project .\Tests\StingerCoreUi\StingerCoreUi.Tests.csproj -c Release
+    }
 
     $builder = Join-Path $root 'Release\Build-Release.ps1'
     if (-not (Test-Path $builder)) { throw "Missing build script $builder" }
@@ -161,7 +190,7 @@ try {
     Write-Host "Size: $($setupFile.Length) bytes"
     Write-Host "SHA-256: $sha256"
     Write-Host "Release notes: $notesPath"
-    Write-Warning 'KNOWN ISSUES: Cloud III S receiver 02CC support is unverified on physical hardware; this is an experimental Beta. See release notes.'
+    Write-Warning 'Auto Power-Off reset remains open; experimental Listen-only and non-Cloud-III physical coverage are limited. See release notes.'
 
     if (-not $Publish) {
         Write-Host 'PREPARATION COMPLETE - NOTHING PUBLISHED.' -ForegroundColor Green
@@ -174,13 +203,12 @@ try {
 
     Run-Native 'GitHub release create' {
         gh release create $tag $setupPath --repo $repo --target $sha `
-            --title 'Hyper Battery Monitor v2.4.0 Beta 4' `
+            --title 'Hyper Battery Monitor v2.5.0 Beta 4' `
             --prerelease --latest=false --notes-file $notesPath
     }
 
-    $verifyJson = & gh api "repos/$repo/releases/tags/$tag"
-    if ($LASTEXITCODE -ne 0) { throw 'Published release exists but could not be verified.' }
-    $published = $verifyJson | ConvertFrom-Json
+    # Public readback avoids gh api, which has no --repo option.
+    $published = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
     if ($published.draft -or -not $published.prerelease -or $published.tag_name -cne $tag) {
         throw 'Published release flags/tag do not match the expected Beta 4 prerelease.'
     }
@@ -192,12 +220,11 @@ try {
     if ($matches[0].digest -cne "sha256:$sha256") {
         throw "Published installer SHA mismatch or missing GitHub digest. Local $sha256 ; GitHub $($matches[0].digest)"
     }
-    $gitTagJson = & gh api "repos/$repo/git/ref/tags/$tag"
-    if ($LASTEXITCODE -ne 0) { throw 'Published tag could not be verified through GitHub.' }
-    $gitTag = $gitTagJson | ConvertFrom-Json
-    if ($gitTag.object.type -cne 'commit' -or $gitTag.object.sha -cne $sha) {
-        throw "Release tag does not point directly to expected commit $sha. Inspect before proceeding."
-    }
+    $tagRefs = @(& git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
+    if ($LASTEXITCODE -ne 0 -or $tagRefs.Count -eq 0) { throw 'Published tag could not be verified.' }
+    $peeled = @($tagRefs | Where-Object { $_.EndsWith("refs/tags/$tag^{}") })
+    $resolved = if ($peeled.Count -eq 1) { ($peeled[0] -split '\s+')[0] } else { ($tagRefs[0] -split '\s+')[0] }
+    if ($resolved -cne $sha) { throw "Published tag resolves to $resolved instead of $sha." }
     Write-Host 'BETA 4 PUBLISHED AND VERIFIED.' -ForegroundColor Green
     Write-Host "Release URL: $($published.html_url)"
     Write-Host "Asset SHA-256: $sha256"

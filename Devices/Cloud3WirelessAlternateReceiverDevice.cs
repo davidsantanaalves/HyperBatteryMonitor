@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
+public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IListenOnlyHidDevice
 {
     private const byte ProtocolReportId = 0x66;
     private const byte BatteryResponseSelector = 0x89;
@@ -49,6 +49,15 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
     private bool _isCharging;
     private bool _isMicrophoneMuted;
     private bool _isMicrophoneMuteStateKnown;
+    private bool _listenOnlyMonitoring;
+    private bool _passiveRfConnected;
+
+    public bool IsListening => _listenOnlyMonitoring && _isConnected && _readerTask is { IsCompleted: false };
+    public bool SupportsEventDrivenBattery => _listenOnlyMonitoring;
+    public event EventHandler<bool>? PhysicalConnectionChanged;
+    public event EventHandler? HidReaderStopped;
+    public void EnableListenOnlyMonitoring() => _listenOnlyMonitoring = true;
+
 
     public string Name => Definition.Name;
 
@@ -164,6 +173,7 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
 
             _readerCancellation = new CancellationTokenSource();
             _isConnected = true;
+            _passiveRfConnected = false;
             _isMicrophoneMuted = false;
             _isMicrophoneMuteStateKnown = false;
 
@@ -189,6 +199,7 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
     public void Disconnect()
     {
         _isConnected = false;
+        _passiveRfConnected = false;
 
         CancelPendingRequests();
 
@@ -320,9 +331,10 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
         return new byte[] { ProtocolReportId, selector };
     }
 
-    private async Task ReaderLoopAsync(
-        CancellationToken cancellationToken)
+    private async Task ReaderLoopAsync(CancellationToken cancellationToken)
     {
+        try
+        {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -331,7 +343,12 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
                     cancellationToken);
 
                 if (report is null || report.Length == 0)
+                {
+                    // A passive reader must not spin on USB end-of-stream.
+                    if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+                        break;
                     continue;
+                }
 
                 ProcessInputReport(report);
             }
@@ -345,9 +362,15 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
             }
             catch
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested || _listenOnlyMonitoring)
                     break;
             }
+        }
+        }
+        finally
+        {
+            if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+                HidReaderStopped?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -410,7 +433,16 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
             report.Length >= 5)
         {
             if (report[2] == 0 && report[3] == 0)
+            {
+                if (_listenOnlyMonitoring && selector == BatteryNotificationSelector)
+                {
+                    _passiveRfConnected = false;
+                    SetBatteryUnavailable();
+                    UpdateChargingState(false);
+                    PhysicalConnectionChanged?.Invoke(this, false);
+                }
                 return;
+            }
 
             int battery = report[Definition.BatteryByteIndex];
 
@@ -451,6 +483,11 @@ public sealed class Cloud3WirelessAlternateReceiverDevice : IHyperXDevice, ISele
 
     private void UpdateBattery(int battery)
     {
+        if (_listenOnlyMonitoring && !_passiveRfConnected && battery is >= 0 and <= 100)
+        {
+            _passiveRfConnected = true;
+            PhysicalConnectionChanged?.Invoke(this, true);
+        }
         if (_battery == battery)
             return;
 

@@ -88,6 +88,13 @@ namespace HyperXBatteryTray
     internal static class AppReleaseInfo { public static bool IsBeta => true; }
 }
 
+namespace HyperXBatteryTray.Settings
+{
+    // Compile-time settings boundary for the cross-platform driver runner.
+    // The Windows audit checks these names/values against the production enum.
+    public enum DeviceMonitoringMode { Polling, ListenOnly }
+}
+
 namespace HyperXBatteryTray.Devices
 {
     // Referenced by the common monitor but never instantiated by these DTS tests.

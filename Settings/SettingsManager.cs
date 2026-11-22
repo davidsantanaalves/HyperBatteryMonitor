@@ -534,6 +534,26 @@ public sealed class SettingsManager
             settings.SelectedDevice = string.Empty;
         }
 
+        settings.DeviceMonitoringModes ??= new Dictionary<string, DeviceMonitoringMode>();
+        // Drop unknown models/enum values but retain valid per-model preferences.
+        settings.DeviceMonitoringModes = settings.DeviceMonitoringModes
+            .Where(entry => HyperXDeviceManager.SupportsListenOnlyMonitoring(entry.Key) &&
+                Enum.IsDefined(entry.Value))
+            .GroupBy(entry => HyperXDeviceManager.GetSelectionModelName(entry.Key),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value,
+                StringComparer.OrdinalIgnoreCase);
+
+        // Only verified, supported device settings can be used as last-known UI state.
+        settings.LastKnownAutoPowerOffMinutes ??= new Dictionary<string, int>();
+        settings.LastKnownAutoPowerOffMinutes = settings.LastKnownAutoPowerOffMinutes
+            .Where(entry => HyperXDeviceManager.SupportsAutoPowerOff(entry.Key) &&
+                entry.Value is 0 or 10 or 20 or 30)
+            .GroupBy(entry => HyperXDeviceManager.GetSelectionModelName(entry.Key),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value,
+                StringComparer.OrdinalIgnoreCase);
+
         settings.GradientPercent =
             Math.Clamp(
                 settings.GradientPercent,

@@ -82,6 +82,47 @@ public sealed class NotificationService
         _wasConnected = false;
     }
 
+    public bool ShowDetailedCaptureStarted(int durationHours, AppLanguage language)
+    {
+        string title = Localization.Get("NotificationDetailedCaptureStartedTitle", language);
+        string message = string.Format(
+            Localization.Get("NotificationDetailedCaptureStartedBody", language), durationHours);
+        return ShowNotification(title, message, openAboutOnClick: true);
+    }
+
+    public bool ShowDetailedCaptureResumed(TimeSpan remaining, AppLanguage language)
+    {
+        // Round up to avoid telling the user that a live session has 0 minutes left.
+        int remainingMinutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes));
+        int hours = remainingMinutes / 60;
+        int minutes = remainingMinutes % 60;
+        return ShowNotification(
+            Localization.Get("NotificationDetailedCaptureResumedTitle", language),
+            string.Format(Localization.Get("NotificationDetailedCaptureResumedBody", language),
+                hours, minutes),
+            openAboutOnClick: true);
+    }
+
+    public bool ShowDetailedCaptureCompleted(AppLanguage language, bool essentialLoggingActive = true)
+    {
+        return ShowNotification(
+            Localization.Get("NotificationDetailedCaptureCompletedTitle", language),
+            Localization.Get(essentialLoggingActive
+                ? "NotificationDetailedCaptureCompletedBody"
+                : "NotificationDetailedCaptureCompletedTemporaryBody", language),
+            openAboutOnClick: true);
+    }
+
+    public bool ShowDetailedCaptureStopped(AppLanguage language, bool essentialLoggingActive = true)
+    {
+        return ShowNotification(
+            Localization.Get("NotificationDetailedCaptureStoppedTitle", language),
+            Localization.Get(essentialLoggingActive
+                ? "NotificationDetailedCaptureStoppedBody"
+                : "NotificationDetailedCaptureStoppedTemporaryBody", language),
+            openAboutOnClick: true);
+    }
+
     private static bool ShowLowBatteryNotification(
         string deviceName,
         int battery,
@@ -133,23 +174,28 @@ public sealed class NotificationService
 
     private static bool ShowNotification(
         string title,
-        string batteryText,
-        string instruction,
-        string deviceName)
+        string message,
+        string? instruction = null,
+        string? deviceName = null,
+        bool openAboutOnClick = false)
     {
         try
         {
             ToastContentBuilder builder = new ToastContentBuilder()
                 .AddText(title)
-                .AddText(batteryText)
-                .AddText(instruction);
+                .AddText(message);
 
-            string? imagePath = ResolveDeviceImagePath(deviceName);
+            if (openAboutOnClick)
+                builder.AddArgument("hbm", "diagnostics");
 
-            if (!string.IsNullOrWhiteSpace(imagePath))
+            if (!string.IsNullOrWhiteSpace(instruction))
+                builder.AddText(instruction);
+
+            if (!string.IsNullOrWhiteSpace(deviceName))
             {
-                builder.AddAppLogoOverride(
-                    new Uri(imagePath, UriKind.Absolute));
+                string? imagePath = ResolveDeviceImagePath(deviceName);
+                if (!string.IsNullOrWhiteSpace(imagePath))
+                    builder.AddAppLogoOverride(new Uri(imagePath, UriKind.Absolute));
             }
 
             builder.Show();

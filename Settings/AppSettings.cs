@@ -12,6 +12,12 @@ public enum AppTheme
     System
 }
 
+public enum DeviceMonitoringMode
+{
+    Polling,
+    ListenOnly
+}
+
 public enum BatteryDisplayMode
 {
     StaticIcon,
@@ -47,6 +53,54 @@ public sealed class AppSettings
     internal bool IsNewSettingsProfile { get; set; }
 
     public string SelectedDevice { get; set; } = string.Empty;
+    // Explicit choices only; missing models resolve to their model-specific defaults.
+    public Dictionary<string, DeviceMonitoringMode> DeviceMonitoringModes { get; set; } = new();
+
+    // One verified on-device read per active RF connection; never serialized,
+    // inherited by another headset, or used to initiate periodic HID queries.
+    [JsonIgnore]
+    public int? RuntimeAutoPowerOffMinutes { get; set; }
+
+    // The last VERIFIED setting for this exact model, for read-only display
+    // while disconnected. It is never used to send an HID write automatically.
+    public Dictionary<string, int> LastKnownAutoPowerOffMinutes { get; set; } = new();
+
+    public int? GetLastKnownAutoPowerOff(string? model)
+    {
+        string key = HyperXBatteryTray.Devices.HyperXDeviceManager.GetSelectionModelName(model);
+        if (!HyperXBatteryTray.Devices.HyperXDeviceManager.SupportsAutoPowerOff(key))
+            return null;
+        return LastKnownAutoPowerOffMinutes != null &&
+            LastKnownAutoPowerOffMinutes.TryGetValue(key, out int minutes) &&
+            minutes is 0 or 10 or 20 or 30 ? minutes : null;
+    }
+
+    // Called only after a device query or confirmed setter; returns true on change.
+    public bool RememberVerifiedAutoPowerOff(string? model, int minutes)
+    {
+        string key = HyperXBatteryTray.Devices.HyperXDeviceManager.GetSelectionModelName(model);
+        if (!HyperXBatteryTray.Devices.HyperXDeviceManager.SupportsAutoPowerOff(key) ||
+            minutes is not (0 or 10 or 20 or 30)) return false;
+        LastKnownAutoPowerOffMinutes ??= new Dictionary<string, int>();
+        if (LastKnownAutoPowerOffMinutes.TryGetValue(key, out int existing) &&
+            existing == minutes) return false;
+        LastKnownAutoPowerOffMinutes[key] = minutes;
+        return true;
+    }
+
+
+    public DeviceMonitoringMode GetMonitoringMode(string? model)
+    {
+        string key = HyperXBatteryTray.Devices.HyperXDeviceManager.GetSelectionModelName(model);
+        if (!HyperXBatteryTray.Devices.HyperXDeviceManager.SupportsListenOnlyMonitoring(key))
+            return DeviceMonitoringMode.Polling;
+        if (DeviceMonitoringModes != null && DeviceMonitoringModes.TryGetValue(key, out DeviceMonitoringMode selected) &&
+            Enum.IsDefined(selected))
+            return selected;
+        return string.Equals(key, "HyperX Cloud III", StringComparison.OrdinalIgnoreCase)
+            ? DeviceMonitoringMode.ListenOnly : DeviceMonitoringMode.Polling;
+    }
+
     public BatteryDisplayMode DisplayMode { get; set; } = BatteryDisplayMode.StaticIcon;
     public AdvancedDisplayMode AdvancedDisplayMode { get; set; } = AdvancedDisplayMode.BatteryGradient;
     public bool UseGradient { get; set; } = true;

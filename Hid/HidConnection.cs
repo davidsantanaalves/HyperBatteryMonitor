@@ -434,6 +434,15 @@ public sealed class HidConnection : IDisposable
         return match.Success ? match.Value.ToUpperInvariant() : string.Empty;
     }
 
+    // Safety gate for experimental passive mode: the legacy endpoint selector
+    // may return only the first path. Count all matching paths before bypassing
+    // ReceiverAwareDevice's multi-receiver validation.
+    internal static int CountMatchingDevicePaths(HyperXDeviceDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return EnumerateDevicePaths(definition.Matches).Count;
+    }
+
     public static string? FindDevice(HyperXDeviceDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);

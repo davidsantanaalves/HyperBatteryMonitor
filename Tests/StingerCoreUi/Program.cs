@@ -58,17 +58,21 @@ internal static class Program
             using var tray = (Form)Activator.CreateInstance(trayType, Instance, null,
                 [settings, receiver, false, null, AppTheme.Dark,
                     new Action<object?, EventArgs>((_, _) => { }), new Action<object?, EventArgs>((_, _) => { })], null)!;
-            bool muteAsset = !supported || state == "muted";
-            Check(Equals(Get(form, "_sidebarMicrophoneIconUsesMuteAsset"), muteAsset), "Settings icon");
-            Check(Equals(Get(tray, "_microphoneIconUsesMuteAsset"), muteAsset), "tray icon");
+            bool muteAsset = supported && state == "muted";
+            object settingsGlyph = Get(form, "_sidebarMicrophoneSummaryGlyph")!;
+            object trayGlyph = Get(tray, "_microphoneSummaryGlyph")!;
+            string expectedIcon = muteAsset ? "mute" : "mic";
+            Check(Equals(settingsGlyph.GetType().GetProperty("IconKey")!.GetValue(settingsGlyph), expectedIcon), "Settings icon");
+            Check(Equals(trayGlyph.GetType().GetProperty("IconKey")!.GetValue(trayGlyph), expectedIcon), "tray icon");
             object capabilityIcon = Get(form, "_microphoneCapabilityIcon")!;
             Check(Equals(capabilityIcon.GetType().GetProperty("IconKey")!.GetValue(capabilityIcon),
                 supported ? "supported" : "unsupported"), "Settings capability badge");
-            string expected = supported && state == "muted" ? "Muted" : supported && state == "open" ? "Open" : "N/A";
+            string expected = Localization.Get(supported && state == "muted" ? "MicrophoneMuted"
+                : supported && state == "open" ? "MicrophoneOpen" : "SidebarWaiting", settings.Language);
             Check(((Label)Get(form, "_sidebarMicrophoneLabel")!).Text == expected, "Settings microphone text");
             Check(((Label)Get(tray, "_microphoneText")!).Text == expected, "tray microphone text");
             trayType.GetMethod("ApplyTheme")!.Invoke(tray, [false]);
-            Check(Equals(Get(tray, "_microphoneIconUsesMuteAsset"), muteAsset), "theme change reverted icon");
+            Check(Equals(trayGlyph.GetType().GetProperty("IconKey")!.GetValue(trayGlyph), expectedIcon), "theme change reverted icon");
             Console.WriteLine($"PASS {definition.Name}: {state}, supported={supported}, icon={(muteAsset ? "mute" : "mic")}, text={expected}");
             cases++;
         }
@@ -78,6 +82,7 @@ internal static class Program
         NotificationsRefreshesMuteCapability();
         Console.WriteLine("PASS Notifications refreshes in place and preserves mute preferences");
         Console.WriteLine($"All {cases + 2} UI cases passed.");
+        Beta4Contracts.Run();
     }
 
     private const string Model = "HyperX Cloud Stinger Core Wireless + 7.1";

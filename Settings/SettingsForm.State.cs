@@ -49,7 +49,10 @@ public sealed partial class SettingsForm : Form
             _sidebarBatteryTitleLabel.Text = L("SidebarBattery");
         if (_sidebarMicrophoneTitleLabel != null)
             _sidebarMicrophoneTitleLabel.Text = L("SidebarMicrophone");
-        UpdateAutoPowerOffLanguage();
+        if (_sidebarAutoPowerOffTitleLabel != null)
+            _sidebarAutoPowerOffTitleLabel.Text = L("SidebarAutoPowerOff");
+        if (_sidebarMonitoringTitleLabel != null)
+            _sidebarMonitoringTitleLabel.Text = L("SidebarMonitoringMode");
         if (_deviceSelector != null)
         {
             _deviceSelector.SetLanguage(_selectedLanguage);
@@ -116,6 +119,12 @@ public sealed partial class SettingsForm : Form
         if (_darkThemeOption != null) _darkThemeOption.DarkMode = dark;
         if (_systemThemeOption != null) _systemThemeOption.DarkMode = dark;
         if (_startupToggle != null) _startupToggle.DarkMode = dark;
+        if (_deviceSettingsButton is { IsDisposed: false })
+        {
+            _deviceSettingsButton.DarkMode = dark;
+            _deviceSettingsButton.OutsideBackColor = dark
+                ? Color.FromArgb(42, 45, 48) : Color.FromArgb(248, 249, 251);
+        }
         if (_notifyOnLowBatteryToggle != null) _notifyOnLowBatteryToggle.DarkMode = dark;
         if (_notifyWhenFullyChargedToggle != null) _notifyWhenFullyChargedToggle.DarkMode = dark;
         if (_blinkOnCriticalBatteryToggle != null) _blinkOnCriticalBatteryToggle.DarkMode = dark;
@@ -153,7 +162,17 @@ public sealed partial class SettingsForm : Form
         if (_sidebarMicrophoneTitleLabel != null)
             _sidebarMicrophoneTitleLabel.ForeColor = secondary;
         if (_sidebarMicrophoneLabel != null)
-            _sidebarMicrophoneLabel.ForeColor = secondary;
+            _sidebarMicrophoneLabel.ForeColor = foreground;
+        if (_sidebarAutoPowerOffTitleLabel != null)
+            _sidebarAutoPowerOffTitleLabel.ForeColor = secondary;
+        if (_sidebarAutoPowerOffLabel != null)
+            _sidebarAutoPowerOffLabel.ForeColor = foreground;
+        if (_sidebarMonitoringTitleLabel != null)
+            _sidebarMonitoringTitleLabel.ForeColor = secondary;
+        if (_sidebarMonitoringLabel != null)
+            _sidebarMonitoringLabel.ForeColor = foreground;
+        if (_sidebarSummaryDivider != null)
+            _sidebarSummaryDivider.BackColor = dark ? DarkBorder : LightBorder;
         UpdateSidebarDeviceStatus(
             _deviceSelector != null && _deviceSelector.SelectedIndex > 0,
             _device != null && _device.IsConnected && _device.Battery >= 0 && _device.Battery <= 100);
@@ -185,13 +204,6 @@ public sealed partial class SettingsForm : Form
             _deviceSelector.Invalidate();
         }
 
-        if (_autoPowerOffSelector != null)
-        {
-            _autoPowerOffSelector.DarkMode = dark;
-            _autoPowerOffSelector.Invalidate();
-        }
-        if (_autoPowerOffDescription != null)
-            _autoPowerOffDescription.ForeColor = secondary;
 
         if (_autoDetectButton != null)
         {
@@ -349,6 +361,7 @@ public sealed partial class SettingsForm : Form
 
         AppSettings defaults = AppSettings.CreateDefault();
         _pendingSelectedDevice = defaults.SelectedDevice;
+        _pendingDeviceMonitoringModes.Clear();
         _pendingUpdateChannel = defaults.UpdateChannel;
         _pendingUpdateChannelUserSelected = false;
         _pendingUpdateDownloadMode = defaults.UpdateDownloadMode;
@@ -403,12 +416,11 @@ public sealed partial class SettingsForm : Form
             .ToList();
     }
 
-    private async Task<bool> ApplySettingsAsync()
+    private Task<bool> ApplySettingsAsync()
     {
-        if (!await CommitAutoPowerOffAsync())
-            return false;
-
         _settings.SelectedDevice = _pendingSelectedDevice;
+        _settings.DeviceMonitoringModes = new Dictionary<string, DeviceMonitoringMode>(
+            _pendingDeviceMonitoringModes, StringComparer.OrdinalIgnoreCase);
         _settings.UpdateChannel = _pendingUpdateChannel;
         _settings.UpdateChannelUserSelected = _pendingUpdateChannelUserSelected;
         _settings.UpdateDownloadMode = _pendingUpdateDownloadMode;
@@ -438,11 +450,11 @@ public sealed partial class SettingsForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(this, string.Format(L("StartupError"), ex.Message), Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return false;
+            return Task.FromResult(false);
         }
         StopDevicePreview();
         SettingsApplied?.Invoke(this, EventArgs.Empty);
-        return true;
+        return Task.FromResult(true);
     }
 
     private void SettingsForm_FormClosed(object? sender, FormClosedEventArgs e)

@@ -56,3 +56,14 @@ public interface IEventDrivenHidDevice
     bool SupportsEventDrivenBattery { get; }
     event EventHandler<bool>? PhysicalConnectionChanged;
 }
+
+/// <summary>
+/// Experimental HID listening capability. A USB reader can remain open while
+/// the RF headset is off. A transport failure is distinct from RF power-off.
+/// </summary>
+public interface IListenOnlyHidDevice : IEventDrivenHidDevice
+{
+    bool IsListening { get; }
+    void EnableListenOnlyMonitoring();
+    event EventHandler? HidReaderStopped;
+}

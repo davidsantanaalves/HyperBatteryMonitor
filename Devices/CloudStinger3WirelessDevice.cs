@@ -83,7 +83,7 @@ public sealed class CloudStinger3WirelessDevice : HyperXBatteryDeviceBase
             UpdateMicrophoneMuteState(report[5] == 0); // Stinger 3 notification polarity differs from query.
         else if (IsNotification(report, ConnectionNotification) && report[5] != 1)
         {
-            Disconnect();
+            ReportPassiveDisconnect();
             return;
         }
 

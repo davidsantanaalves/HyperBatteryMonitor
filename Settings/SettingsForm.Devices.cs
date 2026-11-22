@@ -39,7 +39,8 @@ public sealed partial class SettingsForm : Form
         }
 
         UnsubscribeFromDeviceStatusEvents(_device);
-        IHyperXDevice? previewDevice = HyperXDeviceManager.CreateDevice(_pendingSelectedDevice);
+        IHyperXDevice? previewDevice = HyperXDeviceManager.CreateDevice(_pendingSelectedDevice,
+            GetPendingDeviceMonitoringMode());
         _device = previewDevice;
         _isCharging = false;
         _batteryRemainingTime = null;
@@ -47,7 +48,7 @@ public sealed partial class SettingsForm : Form
         if (previewDevice == null)
             return;
 
-        BatteryMonitor previewMonitor = new(previewDevice);
+        BatteryMonitor previewMonitor = new(previewDevice, GetPendingDeviceMonitoringMode());
 
         previewMonitor.BatteryChanged += DevicePreviewMonitor_BatteryChanged;
         previewMonitor.ConnectionChanged += DevicePreviewMonitor_ConnectionChanged;
@@ -284,7 +285,7 @@ public sealed partial class SettingsForm : Form
         }
         else
         {
-            _sidebarBatteryLabel.Text = L("BatteryNA");
+            _sidebarBatteryLabel.Text = L("SidebarWaiting");
         }
         bool microphoneMonitoringSupported =
             selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized, _device);
@@ -295,9 +296,9 @@ public sealed partial class SettingsForm : Form
         bool microphoneMuted = microphoneStatusAvailable && _device!.IsMicrophoneMuted;
         _sidebarMicrophoneLabel.Text = microphoneStatusAvailable
             ? (microphoneMuted ? L("MicrophoneMuted") : L("MicrophoneOpen"))
-            : L("MicrophoneNA");
-        bool useMuteIcon = !selected || !microphoneMonitoringSupported || microphoneMuted;
-        UpdateSidebarMicrophoneIcon(EffectiveTheme == AppTheme.Dark, useMuteIcon);
+            : L("SidebarWaiting");
+        _sidebarMicrophoneSummaryGlyph.IconKey = microphoneStatusAvailable && microphoneMuted
+            ? MicrophoneMutedIconAssetName : MicrophoneOpenIconAssetName;
 
         Color foreground = EffectiveTheme == AppTheme.Dark ? Color.WhiteSmoke : LightText;
         Color secondary = EffectiveTheme == AppTheme.Dark ? DarkSecondary : LightSecondary;
@@ -309,6 +310,29 @@ public sealed partial class SettingsForm : Form
         _sidebarMicrophoneTitleLabel.ForeColor = secondary;
         _sidebarMicrophoneLabel.ForeColor = secondary;
 
+        bool powerOffSupported = selected &&
+            HyperXDeviceManager.SupportsAutoPowerOff(deviceName) &&
+            (!connected || _device is IAutoPowerOffDevice { SupportsAutoPowerOff: true });
+        _sidebarAutoPowerOffLabel.Text = !connected
+            ? L("SidebarWaiting")
+            : FormatSidebarAutoPowerOff(ReferenceEquals(_device, _runtimeDevice)
+                ? _settings.RuntimeAutoPowerOffMinutes : _autoPowerOffCurrent);
+        _sidebarMonitoringLabel.Text = selected
+            ? L(GetPendingDeviceMonitoringMode() == DeviceMonitoringMode.ListenOnly
+                ? "MonitoringModeListenOnly" : "MonitoringModePolling")
+            : L("SidebarWaiting");
+        ReflowSidebarSummary(microphoneMonitoringSupported, powerOffSupported, selected);
+        _sidebarAutoPowerOffTitleLabel.ForeColor = secondary;
+        _sidebarAutoPowerOffLabel.ForeColor = foreground;
+        _sidebarMonitoringTitleLabel.ForeColor = secondary;
+        _sidebarMonitoringLabel.ForeColor = foreground;
+        _sidebarBatteryLabel.ForeColor = foreground;
+        _sidebarMicrophoneLabel.ForeColor = foreground;
+        _sidebarSummaryDivider.BackColor = EffectiveTheme == AppTheme.Dark ? DarkBorder : LightBorder;
+
+        if (string.Equals(_sidebarImageFileName, imageFile, StringComparison.OrdinalIgnoreCase))
+            return;
+        _sidebarImageFileName = imageFile;
         _sidebarDeviceImage.Image?.Dispose();
         _sidebarDeviceImage.Image = null;
 
@@ -330,6 +354,99 @@ public sealed partial class SettingsForm : Form
         }
 
         _sidebarDeviceImage.Visible = _sidebarDeviceImage.Image != null;
+    }
+
+    private string FormatSidebarAutoPowerOff(int? minutes) => minutes switch
+    {
+        0 => L("AutoPowerOffNever"),
+        10 or 20 or 30 => $"{minutes} min",
+        _ => L("SidebarWaiting")
+    };
+
+    private void ReflowSidebarSummary(bool microphoneSupported, bool powerOffSupported, bool selected)
+    {
+        // Keep the original sidebar width. Each supported row receives enough
+        // space for its complete localized caption and value; unusually long
+        // pairs stack rather than drawing ellipses or overlapping one another.
+        int width = _sidebar.ClientSize.Width - ScaleUi(20);
+        _sidebarDeviceCard.Width = width;
+        int row = ScaleUi(80);
+        int gap = ScaleUi(4);
+        row += PositionSidebarRow(_sidebarBatteryTitleLabel, _sidebarBatteryLabel,
+            _sidebarBatterySummaryGlyph, row) + gap;
+
+        _sidebarMicrophoneTitleLabel.Visible = microphoneSupported;
+        _sidebarMicrophoneLabel.Visible = microphoneSupported;
+        _sidebarMicrophoneSummaryGlyph.Visible = microphoneSupported;
+        if (microphoneSupported)
+        {
+            row += PositionSidebarRow(_sidebarMicrophoneTitleLabel, _sidebarMicrophoneLabel,
+                _sidebarMicrophoneSummaryGlyph, row) + gap;
+        }
+        _sidebarAutoPowerOffTitleLabel.Visible = powerOffSupported;
+        _sidebarAutoPowerOffLabel.Visible = powerOffSupported;
+        _sidebarPowerOffSummaryGlyph.Visible = powerOffSupported;
+        if (powerOffSupported)
+        {
+            row += PositionSidebarRow(_sidebarAutoPowerOffTitleLabel, _sidebarAutoPowerOffLabel,
+                _sidebarPowerOffSummaryGlyph, row) + gap;
+        }
+        _sidebarMonitoringTitleLabel.Visible = selected;
+        _sidebarMonitoringLabel.Visible = selected;
+        _sidebarMonitoringSummaryGlyph.Visible = selected;
+        if (selected)
+        {
+            row += PositionSidebarRow(_sidebarMonitoringTitleLabel, _sidebarMonitoringLabel,
+                _sidebarMonitoringSummaryGlyph, row) + gap;
+        }
+
+        int height = row + ScaleUi(4); // 4px row gap plus 4px bottom padding
+        _sidebarDeviceCard.Size = new Size(width, height);
+        int upper = ScaleUi(SidebarFirstSeparatorLogicalY);
+        int bandHeight = ScaleUi(SidebarSecondSeparatorLogicalY - SidebarFirstSeparatorLogicalY);
+        _sidebarDeviceCard.Location = new Point(ScaleUi(10), upper + Math.Max(0, (bandHeight - height) / 2));
+        _sidebarDeviceImage.Bounds = new Rectangle(ScaleUi(8), ScaleUi(7), ScaleUi(48), ScaleUi(48));
+        _sidebarDeviceNameLabel.Bounds = new Rectangle(ScaleUi(59), ScaleUi(7), width - ScaleUi(66), ScaleUi(34));
+        _sidebarStatusDot.Bounds = new Rectangle(ScaleUi(59), ScaleUi(42), ScaleUi(18), ScaleUi(18));
+        _sidebarStatusLabel.Bounds = new Rectangle(ScaleUi(80), ScaleUi(42), width - ScaleUi(87), ScaleUi(20));
+        _sidebarSummaryDivider.Bounds = new Rectangle(ScaleUi(9), ScaleUi(69), width - ScaleUi(18), ScaleUi(1));
+        _sidebarDeviceCard.Invalidate();
+    }
+
+    private int PositionSidebarRow(Label title, Label value, PngIconControl icon, int top)
+    {
+        int left = ScaleUi(29);
+        int right = _sidebarDeviceCard.ClientSize.Width - ScaleUi(7);
+        int available = Math.Max(ScaleUi(1), right - left);
+        int line = ScaleUi(20);
+        int gap = ScaleUi(4);
+        int titleWidth = TextRenderer.MeasureText(title.Text, title.Font,
+            new Size(2000, line), TextFormatFlags.SingleLine).Width + ScaleUi(2);
+        int valueWidth = TextRenderer.MeasureText(value.Text, value.Font,
+            new Size(2000, line), TextFormatFlags.SingleLine).Width + ScaleUi(2);
+
+        // Center icon geometrically on the first text line; no manual Y offset.
+        int iconSize = ScaleUi(15);
+        icon.Bounds = new Rectangle(ScaleUi(9), top + (line - iconSize) / 2,
+            iconSize, iconSize);
+        title.AutoEllipsis = false;
+        value.AutoEllipsis = false;
+        if (titleWidth + gap + valueWidth <= available)
+        {
+            title.Bounds = new Rectangle(left, top, titleWidth, line);
+            value.Bounds = new Rectangle(left + titleWidth + gap, top,
+                available - titleWidth - gap, line);
+            return line;
+        }
+
+        // Long languages and remaining-time values use a two-line pair.
+        int titleHeight = Math.Max(line, TextRenderer.MeasureText(title.Text, title.Font,
+            new Size(available, 500), TextFormatFlags.WordBreak).Height + ScaleUi(2));
+        int valueHeight = Math.Max(line, TextRenderer.MeasureText(value.Text, value.Font,
+            new Size(available, 500), TextFormatFlags.WordBreak).Height + ScaleUi(2));
+        title.Bounds = new Rectangle(left, top, available, titleHeight);
+        value.Bounds = new Rectangle(left, top + titleHeight + ScaleUi(1), available, valueHeight);
+        return titleHeight + ScaleUi(1) + valueHeight;
     }
 
     private void UpdateSidebarMicrophoneIcon(bool dark, bool useMuteIcon)
@@ -541,4 +658,15 @@ public sealed partial class SettingsForm : Form
         }
         RefreshDeviceStatus();
     }
+    private DeviceMonitoringMode GetPendingDeviceMonitoringMode()
+    {
+        string model = HyperXDeviceManager.GetSelectionModelName(_pendingSelectedDevice);
+        if (!HyperXDeviceManager.SupportsListenOnlyMonitoring(model))
+            return DeviceMonitoringMode.Polling;
+        if (_pendingDeviceMonitoringModes.TryGetValue(model, out DeviceMonitoringMode chosen))
+            return chosen;
+        return string.Equals(model, "HyperX Cloud III", StringComparison.OrdinalIgnoreCase)
+            ? DeviceMonitoringMode.ListenOnly : DeviceMonitoringMode.Polling;
+    }
+
 }

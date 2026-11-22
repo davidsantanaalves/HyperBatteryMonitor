@@ -4,6 +4,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using HyperXBatteryTray.Devices;
+using HyperXBatteryTray.Diagnostics;
 using HyperXBatteryTray.Monitoring;
 using HyperXBatteryTray.Notifications;
 using HyperXBatteryTray.Settings;
@@ -34,6 +35,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private bool _blinkState;
     private bool _isCharging;
     private bool _isMicrophoneMuted;
+    private CancellationTokenSource? _autoPowerOffSnapshotCts;
+    private bool _autoPowerOffSnapshotAttempted;
     private System.Windows.Forms.Timer? _blinkTimer;
     private System.Windows.Forms.Timer? _leftClickTimer;
     private bool _leftClickPending;
@@ -75,6 +78,10 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         // The hidden WinForms control marshals all Settings navigation to the UI thread.
         _ = _toastActivationDispatcher.Handle;
         UpdateNotificationService.OpenAboutRequested += OnUpdateToastActivated;
+        BetaDiagnostics.DetailedCaptureTransitioned += OnDetailedCaptureTransitioned;
+        // Resume after the WinForms message loop starts, so toast activation and
+        // UI navigation are ready even on a cold launch.
+        Application.Idle += ResumeDetailedCaptureOnStartup;
 
         ApplyLocalization();
         ApplyTheme();
@@ -101,12 +108,13 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         if (string.IsNullOrWhiteSpace(_settings.SelectedDevice))
             return;
 
-        _device = _deviceManager.GetAvailableDevice(_settings.SelectedDevice);
+        _device = _deviceManager.GetAvailableDevice(_settings.SelectedDevice,
+            _settings.GetMonitoringMode(_settings.SelectedDevice));
 
         if (_device == null)
             return;
 
-        _batteryMonitor = new BatteryMonitor(_device)
+        _batteryMonitor = new BatteryMonitor(_device, _settings.GetMonitoringMode(_settings.SelectedDevice))
         {
             IntervalMilliseconds = 5000
         };
@@ -120,6 +128,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
     private void DisposeDeviceMonitor()
     {
+        ResetAutoPowerOffSnapshot();
         if (_batteryMonitor != null)
         {
             _batteryMonitor.BatteryChanged -= BatteryMonitor_BatteryChanged;
@@ -299,10 +308,65 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             _updateCoordinator,
             InstallDownloadedUpdateAsync);
         _settingsForm.SettingsApplied += SettingsForm_SettingsApplied;
+        _settingsForm.DeviceMonitoringModeSaved += SettingsForm_DeviceMonitoringModeSaved;
+        _settingsForm.DeviceAutoPowerOffSnapshotChanged += SettingsForm_DeviceAutoPowerOffSnapshotChanged;
         _settingsForm.FormClosed += SettingsForm_FormClosed;
         _settingsForm.Show();
         _settingsForm.BringToFront();
         _settingsForm.Activate();
+    }
+
+    private void ResumeDetailedCaptureOnStartup(object? sender, EventArgs e)
+    {
+        Application.Idle -= ResumeDetailedCaptureOnStartup;
+        try { BetaDiagnostics.TryResumeDetailedCapture(); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"Could not resume detailed capture: {ex.GetType().Name}");
+        }
+    }
+
+    private void OnDetailedCaptureTransitioned(BetaDiagnostics.DetailedCaptureTransition transition,
+        int durationHours)
+    {
+        try
+        {
+            if (_toastActivationDispatcher.IsDisposed || !_toastActivationDispatcher.IsHandleCreated)
+                return;
+
+            void NotifyOnUiThread()
+            {
+                if (_toastActivationDispatcher.IsDisposed)
+                    return;
+                switch (transition)
+                {
+                    case BetaDiagnostics.DetailedCaptureTransition.Started:
+                        _notificationService.ShowDetailedCaptureStarted(durationHours, _settings.Language);
+                        break;
+                    case BetaDiagnostics.DetailedCaptureTransition.Resumed:
+                        DateTimeOffset? deadline = BetaDiagnostics.DetailedCaptureEndsAtUtc;
+                        if (deadline.HasValue)
+                            _notificationService.ShowDetailedCaptureResumed(
+                                deadline.Value - DateTimeOffset.UtcNow, _settings.Language);
+                        break;
+                    case BetaDiagnostics.DetailedCaptureTransition.Completed:
+                        _notificationService.ShowDetailedCaptureCompleted(_settings.Language,
+                            BetaDiagnostics.IsEssentialLoggingEnabled);
+                        break;
+                    case BetaDiagnostics.DetailedCaptureTransition.Stopped:
+                        _notificationService.ShowDetailedCaptureStopped(_settings.Language,
+                            BetaDiagnostics.IsEssentialLoggingEnabled);
+                        break;
+                }
+            }
+
+            if (_toastActivationDispatcher.InvokeRequired)
+                _toastActivationDispatcher.BeginInvoke((Action)NotifyOnUiThread);
+            else
+                NotifyOnUiThread();
+        }
+        catch (InvalidOperationException) { /* Application is shutting down. */ }
     }
 
     private void OnUpdateToastActivated()
@@ -331,8 +395,42 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private void SettingsForm_FormClosed(object? sender, FormClosedEventArgs e)
     {
         if (sender is SettingsForm form)
+        {
             form.SettingsApplied -= SettingsForm_SettingsApplied;
+            form.DeviceMonitoringModeSaved -= SettingsForm_DeviceMonitoringModeSaved;
+            form.DeviceAutoPowerOffSnapshotChanged -= SettingsForm_DeviceAutoPowerOffSnapshotChanged;
+        }
         _settingsForm = null;
+    }
+
+    private void SettingsForm_DeviceAutoPowerOffSnapshotChanged(object? sender, EventArgs e)
+    {
+        UpdateTray();
+    }
+
+    private void SettingsForm_DeviceMonitoringModeSaved(object? sender, string model)
+    {
+        // The modal already persisted only this model's selection. Avoid applying
+        // unrelated unsaved settings in the main window.
+        if (!HyperXDeviceManager.IsSameDevice(_settings.SelectedDevice, model))
+            return;
+
+        try
+        {
+            InitializeSelectedDevice();
+            _settingsForm?.SetDevice(_device);
+            _settingsForm?.SetBatteryRemainingTime(GetCurrentBatteryRemainingTime());
+            _batteryMonitor?.Start();
+            RestartBlinkTimer();
+            UpdateTrayIcon();
+            UpdateTray();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(_settingsForm,
+                string.Format(L("SaveError"), ex.Message), Application.ProductName,
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void SettingsForm_SettingsApplied(object? sender, EventArgs e)
@@ -388,8 +486,60 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             GetCurrentBatteryRemainingTime());
     }
 
+    private void ResetAutoPowerOffSnapshot()
+    {
+        _autoPowerOffSnapshotCts?.Cancel();
+        _autoPowerOffSnapshotCts = null;
+        _autoPowerOffSnapshotAttempted = false;
+        _settings.RuntimeAutoPowerOffMinutes = null;
+        _settingsForm?.RefreshRuntimeStatusSummary();
+    }
+
+    private async void StartAutoPowerOffSnapshot()
+    {
+        if (_autoPowerOffSnapshotAttempted ||
+            _device is not IAutoPowerOffDevice { SupportsAutoPowerOff: true } control ||
+            _device.Battery is < 0 or > 100)
+            return;
+
+        IHyperXDevice identity = _device;
+        _autoPowerOffSnapshotAttempted = true;
+        CancellationTokenSource cts = new();
+        _autoPowerOffSnapshotCts = cts;
+        try
+        {
+            // One setting query per connection, not a recurring polling timer.
+            int? value = await control.QueryAutoPowerOffAsync(cts.Token);
+            if (!cts.IsCancellationRequested && ReferenceEquals(identity, _device) &&
+                value is 0 or 10 or 20 or 30)
+            {
+                _settings.RuntimeAutoPowerOffMinutes = value;
+                if (_settings.RememberVerifiedAutoPowerOff(_settings.SelectedDevice, value.Value))
+                {
+                    try { _settingsManager.Save(_settings); }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Could not persist verified Auto Power-Off: {ex.Message}");
+                    }
+                }
+                _settingsForm?.RefreshRuntimeStatusSummary();
+                UpdateTray();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { /* Unknown stays 'Waiting'; no guessed settings. */ }
+        finally
+        {
+            if (ReferenceEquals(_autoPowerOffSnapshotCts, cts))
+                _autoPowerOffSnapshotCts = null;
+            cts.Dispose();
+        }
+    }
+
     private void BatteryMonitor_ConnectionChanged(object? sender, bool connected)
     {
+        if (!connected)
+            ResetAutoPowerOffSnapshot();
         if (!connected)
         {
             _isCharging = false;
@@ -414,10 +564,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             RestartBlinkTimer();
         UpdateTrayIcon();
         UpdateTray();
-        _trayMenu?.UpdateDevice(
-            _device,
-            _isCharging,
-            GetCurrentBatteryRemainingTime());
+        if (connected) StartAutoPowerOffSnapshot();
     }
 
     private void BatteryMonitor_ChargingChanged(
@@ -492,50 +639,76 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private void UpdateNotifyIconTooltip()
     {
         bool selected = !string.IsNullOrWhiteSpace(_settings.SelectedDevice);
+        string model = HyperXDeviceManager.GetSelectionModelName(_settings.SelectedDevice);
         string deviceName = selected
-            ? Localization.DeviceDisplayName(
-                HyperXDeviceManager.GetSelectionModelName(_settings.SelectedDevice),
-                _settings.Language)
+            ? Localization.DeviceDisplayName(model, _settings.Language)
             : L("UnknownHeadphones");
-        string battery;
-        string status;
-
-        if (!selected || _device == null || !_device.IsConnected || _device.Battery < 0)
+        bool connected = selected && _device?.IsConnected == true &&
+            _device.Battery is >= 0 and <= 100;
+        string batteryValue = L("SidebarWaiting");
+        string? shortBatteryValue = null;
+        if (connected)
         {
-            battery = L("TrayBatteryNA");
-            status = L("TrayDisconnected");
+            int percent = Math.Clamp(_device!.Battery, 0, 100);
+            shortBatteryValue = _isCharging ? $"{percent}% {L("TrayCharging")}" : $"{percent}%";
+            string? remaining = _isCharging ? null : BatteryRemainingTimeFormatter.Format(
+                GetCurrentBatteryRemainingTime(), _settings.Language);
+            batteryValue = remaining == null ? shortBatteryValue : $"{percent}% ({remaining})";
         }
-        else
+        string status = !selected ? L("SidebarUnknown") : connected ? L("Connected") : L("Disconnected");
+        List<string> lines = new()
         {
-            int batteryPercent = Math.Clamp(_device.Battery, 0, 100);
-            string? remaining = BatteryRemainingTimeFormatter.Format(
-                GetCurrentBatteryRemainingTime(),
-                _settings.Language);
-
-            battery = remaining == null
-                ? string.Format(L("TrayBattery"), batteryPercent)
-                : string.Format(L("TrayBatteryWithRemaining"), batteryPercent, remaining);
-
-            if (_isCharging)
-                battery += $" {L("TrayCharging")}";
-            status = L("TrayConnected");
-        }
-
-        bool microphoneStatusAvailable =
-            selected &&
-            _device?.IsConnected == true &&
-            _device.SupportsMicrophoneMuteMonitoring &&
-            _device.IsMicrophoneMuteStateKnown;
-        string microphone = string.Format(
-            L("TrayMicrophone"),
-            microphoneStatusAvailable
+            ApplicationRuntime.TestIndicator + deviceName,
+            status,
+            $"{L("SidebarBattery")}: {batteryValue}"
+        };
+        bool microphoneSupported = selected &&
+            HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(model, _device);
+        if (microphoneSupported)
+        {
+            bool known = connected && _device!.IsMicrophoneMuteStateKnown;
+            string microphoneValue = known
                 ? (_device!.IsMicrophoneMuted ? L("MicrophoneMuted") : L("MicrophoneOpen"))
-                : L("MicrophoneNA"));
+                : L("SidebarWaiting");
+            lines.Add($"{L("SidebarMicrophone")}: {microphoneValue}");
+        }
+        bool powerOffSupported = selected &&
+            HyperXDeviceManager.SupportsAutoPowerOff(model) &&
+            (!connected || _device is IAutoPowerOffDevice { SupportsAutoPowerOff: true });
+        if (powerOffSupported)
+        {
+            string offValue = !connected ? L("SidebarWaiting") : _settings.RuntimeAutoPowerOffMinutes switch
+            {
+                0 => L("AutoPowerOffNever"),
+                10 or 20 or 30 => $"{_settings.RuntimeAutoPowerOffMinutes} min",
+                _ => L("SidebarWaiting")
+            };
+            lines.Add($"{L("SidebarAutoPowerOff")}: {offValue}");
+        }
+        if (selected)
+        {
+            string mode = L(_settings.GetMonitoringMode(model) == DeviceMonitoringMode.ListenOnly
+                ? "MonitoringModeListenOnly" : "MonitoringModePolling");
+            lines.Add($"{L("SidebarMonitoringMode")}: {mode}");
+        }
 
-        string tooltip = $"{ApplicationRuntime.TestIndicator}{deviceName}\n{status}\n{battery}\n{microphone}";
-        _notifyIcon.Text = tooltip.Length <= NotifyIconMaximumTextLength
-            ? tooltip
-            : tooltip[..NotifyIconMaximumTextLength];
+        string tooltip = string.Join("\n", lines);
+        if (tooltip.Length > NotifyIconMaximumTextLength && shortBatteryValue != null)
+        {
+            // Prefer reducing only the estimated-time suffix before dropping rows.
+            lines[2] = $"{L("SidebarBattery")}: {shortBatteryValue}";
+            tooltip = string.Join("\n", lines);
+        }
+        while (tooltip.Length > NotifyIconMaximumTextLength && lines.Count > 3)
+        {
+            // The native Windows NotifyIcon text is capped at 127 UTF-16 chars.
+            // Drop the last optional line, never truncate a translated word.
+            lines.RemoveAt(lines.Count - 1);
+            tooltip = string.Join("\n", lines);
+        }
+        if (tooltip.Length > NotifyIconMaximumTextLength)
+            tooltip = tooltip[..NotifyIconMaximumTextLength];
+        _notifyIcon.Text = tooltip;
     }
 
     private void UpdateBatteryRemainingTimeState()
@@ -1507,6 +1680,8 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        BetaDiagnostics.DetailedCaptureTransitioned -= OnDetailedCaptureTransitioned;
+        Application.Idle -= ResumeDetailedCaptureOnStartup;
         UpdateNotificationService.OpenAboutRequested -= OnUpdateToastActivated;
         _toastActivationDispatcher.Dispose();
         _updateCoordinator.Dispose();

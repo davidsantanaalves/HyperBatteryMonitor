@@ -23,6 +23,7 @@ public sealed partial class SettingsForm : Form
     private readonly StartupManager _startupManager;
     private readonly PngIconCache _iconCache;
     private DeviceSelector _deviceSelector = null!;
+    private ActionButton? _deviceSettingsButton;
     private RoundedLanguageSelector _languageComboBox = null!;
     private ToggleSwitchControl _startupToggle = null!;
     private ThemeOptionControl _lightThemeOption = null!;
@@ -63,6 +64,16 @@ public sealed partial class SettingsForm : Form
     private Label _sidebarMicrophoneTitleLabel = null!;
     private PictureBox _sidebarMicrophoneIcon = null!;
     private Label _sidebarMicrophoneLabel = null!;
+    private Label _sidebarAutoPowerOffTitleLabel = null!;
+    private Label _sidebarAutoPowerOffLabel = null!;
+    private Label _sidebarMonitoringTitleLabel = null!;
+    private Label _sidebarMonitoringLabel = null!;
+    private Panel _sidebarSummaryDivider = null!;
+    private PngIconControl _sidebarBatterySummaryGlyph = null!;
+    private PngIconControl _sidebarMicrophoneSummaryGlyph = null!;
+    private PngIconControl _sidebarPowerOffSummaryGlyph = null!;
+    private PngIconControl _sidebarMonitoringSummaryGlyph = null!;
+    private string? _sidebarImageFileName;
     private bool? _sidebarMicrophoneIconDark;
     private bool? _sidebarMicrophoneIconUsesMuteAsset;
     private readonly Dictionary<string, SidebarItem> _navButtons = new();
@@ -70,6 +81,7 @@ public sealed partial class SettingsForm : Form
     private AppLanguage _selectedLanguage;
     private AppTheme _selectedTheme;
     private string _pendingSelectedDevice;
+    private Dictionary<string, DeviceMonitoringMode> _pendingDeviceMonitoringModes;
     private bool _pendingStartupEnabled;
     private bool _pendingNotifyOnLowBattery;
     private bool _pendingNotifyWhenFullyCharged;
@@ -230,6 +242,9 @@ public sealed partial class SettingsForm : Form
     }
 
     public event EventHandler? SettingsApplied;
+    // A device-specific monitoring change is persisted by its own modal.
+    public event EventHandler<string>? DeviceMonitoringModeSaved;
+    public event EventHandler? DeviceAutoPowerOffSnapshotChanged;
 
     public SettingsForm(
         AppSettings settings,
@@ -267,6 +282,9 @@ public sealed partial class SettingsForm : Form
         _selectedLanguage = settings.Language;
         _selectedTheme = settings.Theme;
         _pendingSelectedDevice = HyperXDeviceManager.GetSelectionModelName(settings.SelectedDevice);
+        _pendingDeviceMonitoringModes = new Dictionary<string, DeviceMonitoringMode>(
+            settings.DeviceMonitoringModes ?? new Dictionary<string, DeviceMonitoringMode>(),
+            StringComparer.OrdinalIgnoreCase);
         _pendingStartupEnabled = ApplicationRuntime.IsTestMode ? false :
             settings.IsNewSettingsProfile
                 ? AppSettings.DefaultStartWithWindows
@@ -442,6 +460,48 @@ public sealed partial class SettingsForm : Form
             BackColor = Color.Transparent
         };
 
+        // The 170 x 190 px device card stays within the existing sidebar.
+        // Header: small headset photo, two-line name and connection status.
+        // Content: one separator, then only supported status rows.
+        _sidebarDeviceImage.Bounds = new Rectangle(8, 7, 48, 48);
+        _sidebarDeviceNameLabel.Bounds = new Rectangle(59, 7, 104, 34);
+        _sidebarDeviceNameLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _sidebarDeviceNameLabel.Font = new Font("Segoe UI Semibold", 8f);
+        _sidebarDeviceNameLabel.AutoEllipsis = false;
+        _sidebarStatusTitleLabel.Visible = false;
+        _sidebarStatusDot.Bounds = new Rectangle(59, 42, 18, 18);
+        _sidebarStatusLabel.Bounds = new Rectangle(80, 42, 83, 20);
+        _sidebarStatusLabel.Font = new Font("Segoe UI", 8f);
+        _sidebarBatteryIcon.Visible = false;
+        _sidebarMicrophoneIcon.Visible = false;
+        _sidebarBatteryTitleLabel.Font = new Font("Segoe UI", 7.8f);
+        _sidebarBatteryTitleLabel.AutoEllipsis = false;
+        _sidebarBatteryLabel.Font = new Font("Segoe UI Semibold", 7.5f);
+        _sidebarBatteryLabel.TextAlign = ContentAlignment.MiddleRight;
+        _sidebarBatteryLabel.AutoEllipsis = false;
+        _sidebarMicrophoneTitleLabel.Font = new Font("Segoe UI", 7.8f);
+        _sidebarMicrophoneTitleLabel.AutoEllipsis = false;
+        _sidebarMicrophoneLabel.Font = new Font("Segoe UI Semibold", 7.5f);
+        _sidebarMicrophoneLabel.TextAlign = ContentAlignment.MiddleRight;
+
+        _sidebarSummaryDivider = new Panel
+        {
+            Location = new Point(9, 69),
+            Size = new Size(_sidebarDeviceCard.Width - 18, 1),
+            BackColor = DarkBorder
+        };
+        _sidebarAutoPowerOffTitleLabel = MakeSidebarSummaryLabel(L("SidebarAutoPowerOff"), false);
+        _sidebarAutoPowerOffLabel = MakeSidebarSummaryLabel(string.Empty, true);
+        _sidebarMonitoringTitleLabel = MakeSidebarSummaryLabel(L("SidebarMonitoringMode"), false);
+        _sidebarMonitoringLabel = MakeSidebarSummaryLabel(string.Empty, true);
+
+        // Reuse the application's existing theme-aware icon assets, scaled down
+        // consistently for the narrow status summary (no extra image resources).
+        _sidebarBatterySummaryGlyph = MakeSidebarSummaryGlyph("battery_monitor");
+        _sidebarMicrophoneSummaryGlyph = MakeSidebarSummaryGlyph("mic");
+        _sidebarPowerOffSummaryGlyph = MakeSidebarSummaryGlyph("clock");
+        _sidebarMonitoringSummaryGlyph = MakeSidebarSummaryGlyph("connection");
+
         _sidebarDeviceCard.Controls.Add(_sidebarDeviceImage);
         _sidebarDeviceCard.Controls.Add(_sidebarDeviceNameLabel);
         _sidebarDeviceCard.Controls.Add(_sidebarStatusTitleLabel);
@@ -453,6 +513,15 @@ public sealed partial class SettingsForm : Form
         _sidebarDeviceCard.Controls.Add(_sidebarMicrophoneTitleLabel);
         _sidebarDeviceCard.Controls.Add(_sidebarMicrophoneIcon);
         _sidebarDeviceCard.Controls.Add(_sidebarMicrophoneLabel);
+        _sidebarDeviceCard.Controls.Add(_sidebarSummaryDivider);
+        _sidebarDeviceCard.Controls.Add(_sidebarBatterySummaryGlyph);
+        _sidebarDeviceCard.Controls.Add(_sidebarMicrophoneSummaryGlyph);
+        _sidebarDeviceCard.Controls.Add(_sidebarPowerOffSummaryGlyph);
+        _sidebarDeviceCard.Controls.Add(_sidebarMonitoringSummaryGlyph);
+        _sidebarDeviceCard.Controls.Add(_sidebarAutoPowerOffTitleLabel);
+        _sidebarDeviceCard.Controls.Add(_sidebarAutoPowerOffLabel);
+        _sidebarDeviceCard.Controls.Add(_sidebarMonitoringTitleLabel);
+        _sidebarDeviceCard.Controls.Add(_sidebarMonitoringLabel);
         _sidebar.Controls.Add(_sidebarDeviceCard);
 
         _applicationNameLabel = new Label
@@ -501,11 +570,41 @@ public sealed partial class SettingsForm : Form
 
         SubscribeToDeviceStatusEvents(_device);
         FormClosed += SettingsForm_FormClosed;
-        Shown += (_, _) => RefreshAutoPowerOffState();
         FormClosing += (_, e) =>
         {
             if (_autoPowerOffApplying) e.Cancel = true;
         };
+    }
+
+    private PngIconControl MakeSidebarSummaryGlyph(string iconKey) => new(_iconCache, iconKey)
+    {
+        Size = new Size(15, 15),
+        BackColor = Color.Transparent,
+        DarkMode = EffectiveTheme == AppTheme.Dark
+    };
+
+    private static Label MakeSidebarSummaryLabel(string text, bool value) => new()
+    {
+        Text = text,
+        AutoSize = false,
+        Size = new Size(value ? 85 : 73, 20),
+        TextAlign = value ? ContentAlignment.MiddleRight : ContentAlignment.MiddleLeft,
+        Font = new Font(value ? "Segoe UI Semibold" : "Segoe UI", value ? 7.5f : 7.8f),
+        // Responsive status rows will wrap instead of clipping with an ellipsis.
+        AutoEllipsis = false,
+        BackColor = Color.Transparent
+    };
+
+    internal void RefreshRuntimeStatusSummary()
+    {
+        if (IsDisposed || Disposing) return;
+        if (IsHandleCreated && InvokeRequired)
+        {
+            BeginInvoke((MethodInvoker)RefreshRuntimeStatusSummary);
+            return;
+        }
+        if (_deviceSelector != null)
+            RefreshDeviceStatus();
     }
 
     internal void SetDevice(IHyperXDevice? device)

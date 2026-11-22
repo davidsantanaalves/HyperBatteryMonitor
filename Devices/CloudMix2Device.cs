@@ -85,7 +85,7 @@ public sealed class CloudMix2Device : HyperXBatteryDeviceBase
         else if (IsNotification(report, ConnectionNotification) && report[NotificationValueIndex] != ActiveValue)
         {
             // Let BatteryMonitor reconnect and initialize microphone state again.
-            Disconnect();
+            ReportPassiveDisconnect();
             return;
         }
         CompleteReportRequest(report);

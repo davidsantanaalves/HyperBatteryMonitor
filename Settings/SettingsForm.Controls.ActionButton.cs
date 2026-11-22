@@ -24,6 +24,7 @@ public sealed partial class SettingsForm : Form
         private int _iconLogicalSize = 20;
         private bool _iconOnly;
         private bool _tealAccent;
+        private bool _dangerAccent;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool ShowResetIcon { get => _showResetIcon; set { _showResetIcon = value; Invalidate(); } }
@@ -37,6 +38,10 @@ public sealed partial class SettingsForm : Form
         // Used by the About > Diagnostics action in both Light and Dark themes.
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool TealAccent { get => _tealAccent; set { _tealAccent = value; Invalidate(); } }
+
+        // Opt-in destructive action styling (e.g., Stop capture); all other buttons stay unchanged.
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool DangerAccent { get => _dangerAccent; set { _dangerAccent = value; Invalidate(); } }
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string? IconKey { get => _iconKey; set { _iconKey = value; Invalidate(); } }
@@ -94,8 +99,16 @@ public sealed partial class SettingsForm : Form
                 fill = _pressed ? Color.FromArgb(9, 91, 107) :
                     _hover ? Color.FromArgb(13, 122, 143) : Color.FromArgb(11, 114, 133);
 
-            Color border = _tealAccent ? Color.FromArgb(41, 145, 164) :
-                (_dark ? Color.FromArgb(82, 88, 95) : Color.FromArgb(198, 205, 214));
+            // Theme-aware muted red for explicit stop/destructive actions, including hover/press.
+            if (_dangerAccent)
+                fill = _pressed ? (_dark ? Color.FromArgb(137, 37, 45) : Color.FromArgb(145, 28, 40)) :
+                    _hover ? (_dark ? Color.FromArgb(190, 58, 68) : Color.FromArgb(174, 34, 47)) :
+                        (_dark ? Color.FromArgb(171, 48, 56) : Color.FromArgb(183, 37, 49));
+
+            Color border = _dangerAccent
+                ? (_dark ? Color.FromArgb(207, 82, 89) : Color.FromArgb(154, 31, 42))
+                : _tealAccent ? Color.FromArgb(41, 145, 164) :
+                    (_dark ? Color.FromArgb(82, 88, 95) : Color.FromArgb(198, 205, 214));
             RectangleF rect = new(1f, 1f, Math.Max(1f, Width - 2f), Math.Max(1f, Height - 2f));
             using GraphicsPath path = GraphicsExtensions.CreateRoundedPath(rect, 7);
             using Brush brush = new SolidBrush(fill);
@@ -128,14 +141,14 @@ public sealed partial class SettingsForm : Form
                     e.Graphics,
                     iconKey,
                     new RectangleF(iconLeft, iconTop, iconSize, iconSize),
-                    _tealAccent || _dark, // White Dark-theme glyph stays legible on teal in Light mode.
+                    _dangerAccent || _tealAccent || _dark, // White glyph on red/teal also in Light mode.
                     DeviceDpi);
             }
 
             if (!_iconOnly)
             {
                 TextRenderer.DrawText(e.Graphics, Text, Font, textRect,
-                    (_tealAccent || _primary) ? Color.White : (_dark ? Color.WhiteSmoke : LightText),
+                    (_dangerAccent || _tealAccent || _primary) ? Color.White : (_dark ? Color.WhiteSmoke : LightText),
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
         }

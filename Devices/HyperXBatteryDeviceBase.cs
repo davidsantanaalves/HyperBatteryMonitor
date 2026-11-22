@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice, IAutoPowerOffDevice
+public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEndpoint, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IListenOnlyHidDevice
 {
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(2);
 
@@ -34,6 +34,37 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     private bool _isMicrophoneMuted;
     private bool _isMicrophoneMuteStateKnown;
     private bool _isConnected;
+    private bool _listenOnlyMonitoring;
+    private bool _passiveRfConnected;
+
+    public bool IsListening => _listenOnlyMonitoring && _isConnected &&
+        _readerTask is { IsCompleted: false };
+    public bool SupportsEventDrivenBattery => _listenOnlyMonitoring && SupportsUnsolicitedBatteryNotifications;
+    public event EventHandler<bool>? PhysicalConnectionChanged;
+    public event EventHandler? HidReaderStopped;
+
+    public void EnableListenOnlyMonitoring()
+    {
+        if (!UsesContinuousReader || !SupportsUnsolicitedBatteryNotifications)
+            throw new InvalidOperationException("HID notifications are not supported by this driver.");
+        _listenOnlyMonitoring = true;
+    }
+
+    protected void ReportPassiveDisconnect()
+    {
+        if (!_listenOnlyMonitoring)
+        {
+            Disconnect();
+            return;
+        }
+        _passiveRfConnected = false;
+        SetBatteryUnavailable();
+        UpdateChargingState(false);
+        _isMicrophoneMuted = false;
+        _isMicrophoneMuteStateKnown = false;
+        PhysicalConnectionChanged?.Invoke(this, false);
+    }
+
 
     protected HyperXBatteryDeviceBase(HyperXDeviceDefinition definition)
     {
@@ -105,6 +136,7 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
                 return false;
 
             _isConnected = true;
+            _passiveRfConnected = false;
             _isMicrophoneMuted = false;
             _isMicrophoneMuteStateKnown = false;
 
@@ -131,6 +163,7 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     public virtual void Disconnect()
     {
         _isConnected = false;
+        _passiveRfConnected = false;
 
         CancelPendingRequests();
 
@@ -501,6 +534,8 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
     private async Task ReaderLoopAsync(
         CancellationToken cancellationToken)
     {
+        try
+        {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -512,7 +547,12 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
                     break;
 
                 if (report is null || report.Length == 0)
+                {
+                    // A passive reader must not spin on USB end-of-stream.
+                    if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+                        break;
                     continue;
+                }
 
                 ProcessInputReport(report);
             }
@@ -526,9 +566,15 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
             }
             catch
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (cancellationToken.IsCancellationRequested || _listenOnlyMonitoring)
                     break;
             }
+        }
+        }
+        finally
+        {
+            if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+                HidReaderStopped?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -726,6 +772,11 @@ public abstract class HyperXBatteryDeviceBase : IHyperXDevice, ISelectableHidEnd
 
     protected void UpdateBattery(int battery)
     {
+        if (_listenOnlyMonitoring && !_passiveRfConnected && battery is >= 0 and <= 100)
+        {
+            _passiveRfConnected = true;
+            PhysicalConnectionChanged?.Invoke(this, true);
+        }
         if (_battery == battery)
             return;
 

@@ -20,7 +20,7 @@ public sealed partial class SettingsForm : Form
     private const int DeviceConnectionRowLogicalHeight = 92;
     private const int DeviceBatteryRowLogicalHeight = 138;
     private const int DeviceBatteryInfoRowLogicalHeight = 50;
-    private const int DeviceAutoPowerOffRowLogicalHeight = 46;
+    private const int DeviceSettingsRowLogicalHeight = 46;
     private const int DeviceCardBottomSpacingLogicalHeight = 4;
     private const int DeviceSectionHeaderLogicalHeight = 42;
     private const int StandardSectionHeaderLogicalHeight = 52;
@@ -160,9 +160,7 @@ public sealed partial class SettingsForm : Form
         TableLayoutPanel batteryLayout = CreateSectionLayout(3, DeviceSectionHeaderLogicalHeight);
         batteryLayout.RowStyles[1].SizeType = SizeType.Absolute;
         batteryLayout.RowStyles[1].Height = ScaleUi(DeviceBatteryInfoRowLogicalHeight);
-        // Fixed-height content row prevents the auto power-off selector from
-        // centering in an oversized proportional cell. All sizes are DPI-scaled.
-        batteryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(DeviceAutoPowerOffRowLogicalHeight)));
+        batteryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, ScaleUi(DeviceSettingsRowLogicalHeight)));
         batteryCard.Controls.Add(batteryLayout);
         AddDeviceSectionHeader(batteryLayout, "battery", "Battery", "BatteryDescription");
         AddDeviceInfoColumnsResponsive(batteryLayout, new[]
@@ -170,7 +168,7 @@ public sealed partial class SettingsForm : Form
             ("clock", "BatteryLife", "Cloud3Wireless_Battery"),
             ("energy", "ChargeTime", "Cloud3Wireless_ChargeTime")
         });
-        BuildAutoPowerOffRow(batteryLayout);
+        BuildDeviceSettingsRow(batteryLayout);
 
         UpdateDeviceCapabilities();
     }
@@ -835,9 +833,9 @@ public sealed partial class SettingsForm : Form
     private void ShowPage(string key)
     {
         _currentPage = key;
+        _deviceSettingsButton = null;
         _languageComboBox?.ClosePopup();
-        _autoPowerOffSelector?.ClosePopup();
-        _autoPowerOffSelector = null;
+        // The power-off selector belongs to the device settings modal, never to a page.
         foreach ((string name, SidebarItem item) in _navButtons)
             item.Selected = name == key;
 

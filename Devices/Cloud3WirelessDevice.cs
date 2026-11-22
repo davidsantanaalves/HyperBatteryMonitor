@@ -2,7 +2,7 @@ using HyperXBatteryTray.Hid;
 
 namespace HyperXBatteryTray.Devices;
 
-public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice, IAutoPowerOffDevice
+public sealed class Cloud3WirelessDevice : IHyperXDevice, IListenOnlyHidDevice, IAutoPowerOffDevice
 {
     private const byte ProtocolReportId = 0x66;
     private const byte BatteryResponseSelector = 0x89;
@@ -41,7 +41,10 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     private TaskCompletionSource<int>? _autoPowerOffRequest;
 
     private int _battery = -1;
-    private bool _isConnected;
+    private volatile bool _isConnected;
+    // In Beta 4 listen-only mode, the USB listener stays open while the RF headset is off.
+    private volatile bool _hidOpen;
+    private bool _listenOnlyMonitoring;
     private bool _isCharging;
     private bool _isMicrophoneMuted;
     private bool _isMicrophoneMuteStateKnown;
@@ -53,6 +56,15 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     public ushort ProductId => Definition.ProductId;
 
     public bool IsConnected => _isConnected;
+
+    public bool ListenOnlyMonitoring => _listenOnlyMonitoring;
+
+    public bool IsListening => _hidOpen && _readerTask is { IsCompleted: false };
+
+    public event EventHandler? HidReaderStopped;
+
+    // Enabled only by BatteryMonitor for the original 03F0:05B7 driver in Beta builds.
+    public void EnableListenOnlyMonitoring() => _listenOnlyMonitoring = true;
 
     public int Battery => _battery;
 
@@ -143,7 +155,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
 
     public bool Connect()
     {
-        if (_isConnected)
+        if (_hidOpen)
             return true;
 
         string? devicePath = HidConnection.FindDevice(Definition);
@@ -157,7 +169,10 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
                 return false;
 
             _readerCancellation = new CancellationTokenSource();
-            _isConnected = true;
+            _hidOpen = true;
+            // Merely opening the dongle does not establish an active RF headset.
+            // Preserve legacy probing behavior outside the Beta 4 listen-only path.
+            _isConnected = !_listenOnlyMonitoring;
             _isMicrophoneMuted = false;
             _isMicrophoneMuteStateKnown = false;
 
@@ -172,6 +187,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
             _readerCancellation?.Dispose();
             _readerCancellation = null;
             _readerTask = null;
+            _hidOpen = false;
             _isConnected = false;
             _isCharging = false;
             _isMicrophoneMuted = false;
@@ -182,6 +198,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
 
     public void Disconnect()
     {
+        _hidOpen = false;
         _isConnected = false;
 
         CancelPendingRequests();
@@ -201,7 +218,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     public async Task<int?> QueryBatteryAsync(
         CancellationToken cancellationToken = default)
     {
-        if (!_isConnected)
+        if (!_hidOpen)
             return null;
 
         var response = new TaskCompletionSource<int>(
@@ -238,7 +255,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     public async Task<bool?> QueryChargeStatusAsync(
         CancellationToken cancellationToken = default)
     {
-        if (!_isConnected)
+        if (!_hidOpen)
             return null;
 
         var response = new TaskCompletionSource<bool>(
@@ -275,7 +292,7 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     public async Task<bool?> QueryMicrophoneMuteStatusAsync(
         CancellationToken cancellationToken = default)
     {
-        if (!_isConnected)
+        if (!_hidOpen)
             return null;
 
         var response = new TaskCompletionSource<bool>(
@@ -317,32 +334,55 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
     private async Task ReaderLoopAsync(
         CancellationToken cancellationToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                byte[]? report = await _connection.ReadAsync(
-                    cancellationToken);
+                try
+                {
+                    byte[]? report = await _connection.ReadAsync(cancellationToken);
+                    if (report is null || report.Length == 0)
+                    {
+                        // A closed HID reader must not spin forever in listen-only mode.
+                        if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+                            break;
+                        continue;
+                    }
 
-                if (report is null || report.Length == 0)
-                    continue;
-
-                ProcessInputReport(report);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (IOException ex)
-            {
-                HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderIoError", ex);
-                break;
-            }
-            catch (Exception ex)
-            {
-                HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderError", ex);
-                if (cancellationToken.IsCancellationRequested)
+                    ProcessInputReport(report);
+                }
+                catch (OperationCanceledException)
+                {
                     break;
+                }
+                catch (IOException ex)
+                {
+                    HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderIoError", ex);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderError", ex);
+                    if (cancellationToken.IsCancellationRequested || _listenOnlyMonitoring)
+                        break;
+                }
+            }
+        }
+        finally
+        {
+            if (_listenOnlyMonitoring && !cancellationToken.IsCancellationRequested)
+            {
+                _hidOpen = false;
+                _isConnected = false;
+                try
+                {
+                    SetBatteryUnavailable();
+                    HidReaderStopped?.Invoke(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    HyperXBatteryTray.Diagnostics.BetaDiagnostics.WriteError("HID.ReaderStoppedHandlerError", ex);
+                }
             }
         }
     }
@@ -353,7 +393,8 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
             return;
 
         byte selector = report[1];
-        if (selector is 0x0A or 0x0B or 0x0C or 0x0D)
+        if (selector is 0x0A or 0x0B or 0x0C or 0x0D ||
+            (_listenOnlyMonitoring && selector == 0x0F))
         {
             // Protocol metadata only; never write arbitrary HID payloads or paths.
             HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.UnsolicitedReport", new
@@ -375,11 +416,21 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
             return;
         }
 
-        if (selector == 0x0B && report.Length >= 3)
+        if ((selector == 0x0B || (_listenOnlyMonitoring && selector == 0x0F)) &&
+            report.Length >= 3 && report[2] is 0 or 1)
         {
             bool physicallyConnected = report[2] == 1;
+            if (_listenOnlyMonitoring && !physicallyConnected)
+            {
+                // Keep the dongle reader open so a future power-on notification is not lost.
+                _isConnected = false;
+                UpdateChargingState(false);
+                _isMicrophoneMuted = false;
+                _isMicrophoneMuteStateKnown = false;
+                SetBatteryUnavailable();
+            }
             HyperXBatteryTray.Diagnostics.BetaDiagnostics.Write("HID.ConnectionNotification",
-                new { Model = Name, Connected = physicallyConnected, Selector = "66:0B" });
+                new { Model = Name, Connected = physicallyConnected, Selector = $"66:{selector:X2}" });
             PhysicalConnectionChanged?.Invoke(this, physicallyConnected);
             return;
         }
@@ -425,13 +476,28 @@ public sealed class Cloud3WirelessDevice : IHyperXDevice, IEventDrivenHidDevice,
             report.Length >= 5)
         {
             if (report[2] == 0 && report[3] == 0)
+            {
+                // An unsolicited power-off sentinel is not a real 0% reading.
+                if (_listenOnlyMonitoring && selector == BatteryNotificationSelector)
+                {
+                    _isConnected = false;
+                    UpdateChargingState(false);
+                    _isMicrophoneMuted = false;
+                    _isMicrophoneMuteStateKnown = false;
+                    SetBatteryUnavailable();
+                    PhysicalConnectionChanged?.Invoke(this, false);
+                }
                 return;
+            }
 
             int battery = report[Definition.BatteryByteIndex];
 
             if (battery > 100)
                 return;
 
+            // Valid battery data, whether queried once or pushed, proves RF responsiveness.
+            if (_listenOnlyMonitoring)
+                _isConnected = true;
             UpdateBattery(battery);
 
             if (selector == BatteryResponseSelector)

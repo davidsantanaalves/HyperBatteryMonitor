@@ -1,4 +1,5 @@
 using HyperXBatteryTray.Hid;
+using HyperXBatteryTray.Settings;
 
 namespace HyperXBatteryTray.Devices;
 
@@ -151,10 +152,12 @@ public sealed class HyperXDeviceManager : IDisposable
             : null;
     }
 
-    public IHyperXDevice? GetAvailableDevice(string? selectedDeviceName) =>
-        CreateDevice(selectedDeviceName);
+    public IHyperXDevice? GetAvailableDevice(
+        string? selectedDeviceName, DeviceMonitoringMode mode = DeviceMonitoringMode.Polling) =>
+        CreateDevice(selectedDeviceName, mode);
 
-    public static IHyperXDevice? CreateDevice(string? selectedDeviceName)
+    public static IHyperXDevice? CreateDevice(
+        string? selectedDeviceName, DeviceMonitoringMode mode = DeviceMonitoringMode.Polling)
     {
         if (string.IsNullOrWhiteSpace(selectedDeviceName))
             return null;
@@ -163,7 +166,30 @@ public sealed class HyperXDeviceManager : IDisposable
         // A model selected in the current UI gets a receiver-aware dispatcher.
         if (TryGetReceiverFamily(selectedDeviceName, out string? modelName))
         {
-            IHyperXDevice receiverDevice = new ReceiverAwareDevice(modelName!, GetReceiverCandidates(modelName!));
+            // Beta 4 Cloud III original-receiver experiment: bypass the receiver
+            // dispatcher only when the original 03F0:05B7 is physically present
+            // and there is no competing 0FCC receiver to disambiguate. The
+            // common monitor then selects its listen-only code path. All other
+            // device families and mixed-receiver cases retain receiver routing.
+            if (AppReleaseInfo.IsBeta &&
+                string.Equals(modelName, "HyperX Cloud III", StringComparison.OrdinalIgnoreCase) &&
+                HidConnection.FindDevice(Cloud3WirelessDevice.Definition) is not null &&
+                HidConnection.FindDevice(Cloud3WirelessAlternateReceiverDevice.Definition) is null)
+            {
+                return new Cloud3WirelessDevice();
+            }
+
+            IReadOnlyList<HyperXDeviceRegistration> registrations = GetReceiverCandidates(modelName!);
+            if (AppReleaseInfo.IsBeta && mode == DeviceMonitoringMode.ListenOnly &&
+                SupportsListenOnlyMonitoring(modelName))
+            {
+                IHyperXDevice? soleDedicated = CreateUnambiguousPassiveDriver(registrations);
+                if (soleDedicated != null)
+                    return soleDedicated;
+            }
+            IHyperXDevice receiverDevice = new ReceiverAwareDevice(modelName!, registrations);
+            // If there is no unambiguous dedicated HID endpoint, retain the
+            // original receiver validation and Bluetooth fallback behavior.
             return BluetoothBatteryProbe.SupportsModel(modelName!)
                 ? new BluetoothFallbackDevice(receiverDevice, modelName!)
                 : receiverDevice;
@@ -172,6 +198,13 @@ public sealed class HyperXDeviceManager : IDisposable
         HyperXDeviceRegistration? registration = FindRegistration(selectedDeviceName);
         if (registration == null)
             return null;
+        if (AppReleaseInfo.IsBeta && mode == DeviceMonitoringMode.ListenOnly &&
+            SupportsListenOnlyMonitoring(selectedDeviceName))
+        {
+            IHyperXDevice? soleDedicated = CreateUnambiguousPassiveDriver(new[] { registration });
+            if (soleDedicated != null)
+                return soleDedicated;
+        }
         IHyperXDevice device = new ReceiverAwareDevice(registration.Definition.Name,
             new[] { registration });
         // Keep the same parser and HID command per registration; only endpoint
@@ -192,6 +225,55 @@ public sealed class HyperXDeviceManager : IDisposable
             GetSelectionModelName(left),
             GetSelectionModelName(right),
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Only headset families whose existing HID readers parse independent battery
+    // notifications. TIO-only routes, Bluetooth and Feature-report-only models are
+    // not eligible for strict passive mode.
+    private static IHyperXDevice? CreateUnambiguousPassiveDriver(
+        IEnumerable<HyperXDeviceRegistration> registrations)
+    {
+        // Do not guess among multiple collections/dongles or substitute a TIO
+        // receiver. Preserving the concrete driver permits listening while
+        // its RF headset is off, without repeated receiver-verification queries.
+        var candidates = registrations
+            .Where(r => r.Definition.ProductId != 0x01BF &&
+                HidConnection.CountMatchingDevicePaths(r.Definition) == 1)
+            .SelectMany(r => HidConnection.EnumerateControlEndpoints(r.Definition)
+                .Select(endpoint => (Registration: r, Endpoint: endpoint)))
+            .Take(2).ToArray();
+        if (candidates.Length != 1)
+            return null;
+
+        IHyperXDevice device = candidates[0].Registration.Factory();
+        if (device is not IListenOnlyHidDevice ||
+            device is not IBetaBatteryNotificationDevice { SupportsUnsolicitedBatteryNotifications: true })
+        {
+            device.Dispose();
+            return null;
+        }
+        return device;
+    }
+
+    public static bool SupportsListenOnlyMonitoring(string? selectedDeviceName)
+    {
+        string model = GetSelectionModelName(selectedDeviceName);
+        return model is "HyperX Cloud III" or "HyperX Cloud III S" or
+            "HyperX Cloud 2 Core" or "HyperX Cloud Alpha" or
+            "HyperX Cloud Mix 2" or "HyperX Cloud Stinger 3 Wireless";
+    }
+
+    public static bool SupportsAutoPowerOff(string? selectedDeviceName)
+    {
+        if (string.IsNullOrWhiteSpace(selectedDeviceName) ||
+            selectedDeviceName.Contains("TIO", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string model = GetSelectionModelName(selectedDeviceName);
+        // Match only implementations that have a verified Auto Power-Off HID
+        // read/write contract; other models must not show the summary row.
+        return model is "HyperX Cloud III" or "HyperX Cloud III S" or
+            "HyperX Cloud 2 Core" or "HyperX Cloud Alpha";
     }
 
     public static bool SupportsMicrophoneMuteMonitoring(

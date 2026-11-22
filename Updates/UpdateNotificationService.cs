@@ -8,6 +8,7 @@ internal static class UpdateNotificationService
 {
     private const string ActivationKey = "hbm";
     private const string ActivationValue = "updates";
+    private const string DiagnosticsActivationValue = "diagnostics";
     private static int _pendingOpenAbout;
 
     internal static event Action? OpenAboutRequested;
@@ -21,7 +22,10 @@ internal static class UpdateNotificationService
             {
                 try
                 {
-                    if (!ToastArguments.Parse(args.Argument).Contains(ActivationKey, ActivationValue))
+                    // Update and detailed-capture notifications both navigate to About.
+                    var activationArguments = ToastArguments.Parse(args.Argument);
+                    if (!activationArguments.Contains(ActivationKey, ActivationValue) &&
+                        !activationArguments.Contains(ActivationKey, DiagnosticsActivationValue))
                         return;
 
                     System.Threading.Interlocked.Exchange(ref _pendingOpenAbout, 1);

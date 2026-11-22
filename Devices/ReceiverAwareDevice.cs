@@ -9,7 +9,7 @@ namespace HyperXBatteryTray.Devices;
 /// endpoint is active at a time. Previously successful collections are tried
 /// first, but are never trusted without a fresh response after reconnection.
 /// </summary>
-internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IMicrophoneMuteStateInvalidationSource
+internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice, IBetaBatteryNotificationDevice, IAutoPowerOffDevice, IMicrophoneMuteStateInvalidationSource, IListenOnlyHidDevice
 {
     private const ushort SharedTioReceiverPid = 0x01BF;
     private readonly string _modelName;
@@ -23,6 +23,7 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
     private volatile bool _verified;
     private bool _disposed;
     private int _generation;
+    private bool _listenOnlyRequested;
 
     private sealed record ReceiverCandidate(
         HyperXDeviceRegistration Registration,
@@ -91,6 +92,11 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         Volatile.Read(ref _active) is IBetaBatteryNotificationDevice notifications &&
         notifications.SupportsUnsolicitedBatteryNotifications;
 
+    public bool IsListening => _verified &&
+        Volatile.Read(ref _active) is IListenOnlyHidDevice { IsListening: true };
+    public event EventHandler? HidReaderStopped;
+    public void EnableListenOnlyMonitoring() => _listenOnlyRequested = true;
+
     public bool SupportsEventDrivenBattery => _verified &&
         Volatile.Read(ref _active) is IEventDrivenHidDevice events && events.SupportsEventDrivenBattery;
     public event EventHandler<bool>? PhysicalConnectionChanged;
@@ -151,6 +157,12 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         try
         {
             device = candidate.Registration.Factory();
+            if (_listenOnlyRequested && device is IListenOnlyHidDevice passive &&
+                device is IBetaBatteryNotificationDevice { SupportsUnsolicitedBatteryNotifications: true })
+            {
+                passive.EnableListenOnlyMonitoring();
+                passive.HidReaderStopped += Active_HidReaderStopped;
+            }
             // A driver that does not support explicit endpoints retains its
             // legacy exact-match behavior; such registrations have a single path.
             if (device is ISelectableHidEndpoint selectable)
@@ -335,6 +347,12 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         _verified ? Volatile.Read(ref _active)?.QueryMicrophoneMuteStatusAsync(cancellationToken)
             ?? Task.FromResult<bool?>(null) : Task.FromResult<bool?>(null);
 
+    private void Active_HidReaderStopped(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(sender, Volatile.Read(ref _active)))
+            HidReaderStopped?.Invoke(this, e);
+    }
+
     private void Active_PhysicalConnectionChanged(object? sender, bool connected)
     {
         if (ReferenceEquals(sender, Volatile.Read(ref _active)))
@@ -371,6 +389,8 @@ internal sealed class ReceiverAwareDevice : IHyperXDevice, IEventDrivenHidDevice
         if (old == null) return;
         if (old is IEventDrivenHidDevice events)
             events.PhysicalConnectionChanged -= Active_PhysicalConnectionChanged;
+        if (old is IListenOnlyHidDevice passive)
+            passive.HidReaderStopped -= Active_HidReaderStopped;
         old.BatteryChanged -= Active_BatteryChanged;
         old.ChargingChanged -= Active_ChargingChanged;
         old.MicrophoneMuteChanged -= Active_MicrophoneMuteChanged;

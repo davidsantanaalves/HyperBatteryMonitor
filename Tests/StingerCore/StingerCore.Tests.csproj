@@ -10,6 +10,7 @@
        Replace only platform HID I/O and unrelated platform services. -->
   <ItemGroup>
     <Compile Include="..\..\Devices\CloudStingerCoreWirelessDevice.cs" Link="Production\CloudStingerCoreWirelessDevice.cs" />
+    <Compile Include="..\..\Devices\Cloud3WirelessDevice.cs" Link="Production\Cloud3WirelessDevice.cs" />
     <Compile Include="..\..\Devices\HyperXBatteryDeviceBase.cs" Link="Production\HyperXBatteryDeviceBase.cs" />
     <Compile Include="..\..\Devices\ReceiverAwareDevice.cs" Link="Production\ReceiverAwareDevice.cs" />
     <Compile Include="..\..\Devices\IHyperXDevice.cs" Link="Production\IHyperXDevice.cs" />

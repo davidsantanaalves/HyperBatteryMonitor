@@ -8,7 +8,7 @@ namespace HyperXBatteryTray;
 
 internal sealed class TrayContextMenuForm : Form
 {
-    private const int MenuLogicalWidth = 168;
+    private const int MenuLogicalWidth = 190;
     private const int MenuLogicalHeight = 245;
     private const int ButtonBarLogicalHeight = 55;
     private const int RowTitleLogicalLeft = 8;
@@ -50,6 +50,15 @@ internal sealed class TrayContextMenuForm : Form
     private readonly Label _microphoneTitle;
     private readonly PictureBox _microphoneIcon;
     private readonly Label _microphoneText;
+    private readonly Label _autoPowerOffTitle;
+    private readonly Label _autoPowerOffText;
+    private readonly Label _monitoringTitle;
+    private readonly Label _monitoringText;
+    private readonly Panel _statusDivider;
+    private readonly TraySummaryGlyphControl _batterySummaryGlyph;
+    private readonly TraySummaryGlyphControl _microphoneSummaryGlyph;
+    private readonly TraySummaryGlyphControl _powerOffSummaryGlyph;
+    private readonly TraySummaryGlyphControl _monitoringSummaryGlyph;
     private readonly TrayMenuButton _settingsButton;
     private readonly TrayMenuButton _exitButton;
     private readonly Panel _buttonBar;
@@ -64,6 +73,7 @@ internal sealed class TrayContextMenuForm : Form
     private bool? _microphoneIconUsesMuteAsset;
     private ToolTip? _toolTip;
     private bool _closeOnDeactivateEnabled;
+    private int _contentLogicalHeight = MenuLogicalHeight;
 
     public TrayContextMenuForm(
         AppSettings settings,
@@ -162,11 +172,50 @@ internal sealed class TrayContextMenuForm : Form
                 MenuLogicalWidth - RowValueLogicalLeft - MenuContentRightInsetLogical,
                 _batteryText.Height));
 
+        // Match the narrow Settings sidebar card: image/name/status header,
+        // ONE divider, and a compact set of supported status rows.
+        _deviceImage.Bounds = new Rectangle(8, 7, 48, 48);
+        _deviceName.Bounds = new Rectangle(59, 7, MenuLogicalWidth - 66, 34);
+        _deviceName.TextAlign = ContentAlignment.MiddleLeft;
+        _deviceName.AutoEllipsis = false;
+        _statusTitle.Visible = false;
+        _statusDot.Bounds = new Rectangle(59, 42, 18, 18);
+        _statusText.Bounds = new Rectangle(80, 42, MenuLogicalWidth - 87, 20);
+        _batteryIcon.Visible = false;
+        _microphoneIcon.Visible = false;
+        _batteryText.AutoEllipsis = false;
+        _microphoneText.AutoEllipsis = false;
+        _batteryText.Font = new Font("Segoe UI Semibold", 7.7f);
+        _microphoneText.Font = new Font("Segoe UI Semibold", 7.7f);
+        _batteryText.TextAlign = ContentAlignment.MiddleRight;
+        _microphoneText.TextAlign = ContentAlignment.MiddleRight;
+        _statusDivider = new Panel
+        {
+            Location = new Point(9, 69),
+            Size = new Size(MenuLogicalWidth - 18, 1),
+            BackColor = Color.FromArgb(70, 74, 78)
+        };
+        _autoPowerOffTitle = CreateLabel(8f, FontStyle.Regular,
+            ContentAlignment.MiddleLeft, new Rectangle(10, 130, 74, 20));
+        _autoPowerOffText = CreateLabel(7.7f, FontStyle.Bold,
+            ContentAlignment.MiddleRight, new Rectangle(86, 130, 76, 20));
+        _monitoringTitle = CreateLabel(8f, FontStyle.Regular,
+            ContentAlignment.MiddleLeft, new Rectangle(10, 154, 74, 20));
+        _monitoringText = CreateLabel(7.7f, FontStyle.Bold,
+            ContentAlignment.MiddleRight, new Rectangle(86, 154, 76, 20));
+        _autoPowerOffText.AutoEllipsis = false;
+        _monitoringText.AutoEllipsis = false;
+        _batterySummaryGlyph = new TraySummaryGlyphControl(_iconCache, "battery_monitor");
+        _microphoneSummaryGlyph = new TraySummaryGlyphControl(_iconCache, "mic");
+        _powerOffSummaryGlyph = new TraySummaryGlyphControl(_iconCache, "clock");
+        _monitoringSummaryGlyph = new TraySummaryGlyphControl(_iconCache, "connection");
         Controls.AddRange(new Control[]
         {
             _deviceImage, _deviceName, _statusTitle, _statusDot, _statusText,
-            _batteryTitle, _batteryIcon, _batteryText,
-            _microphoneTitle, _microphoneIcon, _microphoneText
+            _statusDivider, _batteryTitle, _batteryIcon, _batteryText,
+            _microphoneTitle, _microphoneIcon, _microphoneText,
+            _autoPowerOffTitle, _autoPowerOffText, _monitoringTitle, _monitoringText,
+            _batterySummaryGlyph, _microphoneSummaryGlyph, _powerOffSummaryGlyph, _monitoringSummaryGlyph
         });
 
         _buttonBar = new Panel
@@ -178,15 +227,15 @@ internal sealed class TrayContextMenuForm : Form
         _settingsButton = new TrayMenuButton(_iconCache, "config")
         {
             Location = new Point(0, 0),
-            Size = new Size(84, 55),
+            Size = new Size(MenuLogicalWidth / 2, 55),
             OutsideBackColor = Color.Transparent,
             DrawTopSeparator = true,
             DrawRightSeparator = true
         };
         _exitButton = new TrayMenuButton(_iconCache, "exit")
         {
-            Location = new Point(84, 0),
-            Size = new Size(84, 55),
+            Location = new Point(MenuLogicalWidth / 2, 0),
+            Size = new Size(MenuLogicalWidth / 2, 55),
             OutsideBackColor = Color.Transparent,
             DrawTopSeparator = true
         };
@@ -268,7 +317,7 @@ internal sealed class TrayContextMenuForm : Form
         }
         else
         {
-            _batteryText.Text = Localization.Get("BatteryNA", _settings.Language);
+            _batteryText.Text = Localization.Get("SidebarWaiting", _settings.Language);
         }
         bool microphoneMonitoringSupported =
             selected && HyperXDeviceManager.SupportsMicrophoneMuteMonitoring(normalized, _device);
@@ -277,14 +326,102 @@ internal sealed class TrayContextMenuForm : Form
             microphoneMonitoringSupported &&
             device!.IsMicrophoneMuteStateKnown;
         bool microphoneMuted = microphoneStatusAvailable && device!.IsMicrophoneMuted;
+        _microphoneSummaryGlyph.IconKey = microphoneStatusAvailable && microphoneMuted ? "mute" : "mic";
         _microphoneText.Text = microphoneStatusAvailable
             ? (microphoneMuted
                 ? Localization.Get("MicrophoneMuted", _settings.Language)
                 : Localization.Get("MicrophoneOpen", _settings.Language))
-            : Localization.Get("MicrophoneNA", _settings.Language);
-        bool useMuteIcon = !selected || !microphoneMonitoringSupported || microphoneMuted;
-        SetMicrophoneIcon(_dark, useMuteIcon);
+            : Localization.Get("SidebarWaiting", _settings.Language);
+        bool powerOffSupported = selected &&
+            HyperXDeviceManager.SupportsAutoPowerOff(_settings.SelectedDevice) &&
+            (!connected || device is IAutoPowerOffDevice { SupportsAutoPowerOff: true });
+        int? autoPowerOffMinutes = connected ? _settings.RuntimeAutoPowerOffMinutes : null;
+        _autoPowerOffText.Text = autoPowerOffMinutes switch
+        {
+            0 => Localization.Get("AutoPowerOffNever", _settings.Language),
+            10 or 20 or 30 => $"{autoPowerOffMinutes} min",
+            _ => Localization.Get("SidebarWaiting", _settings.Language)
+        };
+        _monitoringText.Text = selected
+            ? Localization.Get(_settings.GetMonitoringMode(_settings.SelectedDevice) == DeviceMonitoringMode.ListenOnly
+                ? "MonitoringModeListenOnly" : "MonitoringModePolling", _settings.Language)
+            : Localization.Get("SidebarWaiting", _settings.Language);
+        ReflowStatusRows(microphoneMonitoringSupported, powerOffSupported, selected);
         Invalidate(true);
+    }
+
+    private void ReflowStatusRows(bool microphoneSupported, bool powerOffSupported, bool selected)
+    {
+        int row = ScaleTray(80);
+        int gap = ScaleTray(4);
+        row += PlaceTrayRow(_batteryTitle, _batteryText, _batterySummaryGlyph, row) + gap;
+        _microphoneTitle.Visible = microphoneSupported;
+        _microphoneText.Visible = microphoneSupported;
+        _microphoneSummaryGlyph.Visible = microphoneSupported;
+        if (microphoneSupported)
+            row += PlaceTrayRow(_microphoneTitle, _microphoneText, _microphoneSummaryGlyph, row) + gap;
+        _autoPowerOffTitle.Visible = powerOffSupported;
+        _autoPowerOffText.Visible = powerOffSupported;
+        _powerOffSummaryGlyph.Visible = powerOffSupported;
+        if (powerOffSupported)
+            row += PlaceTrayRow(_autoPowerOffTitle, _autoPowerOffText, _powerOffSummaryGlyph, row) + gap;
+        _monitoringTitle.Visible = selected;
+        _monitoringText.Visible = selected;
+        _monitoringSummaryGlyph.Visible = selected;
+        if (selected)
+            row += PlaceTrayRow(_monitoringTitle, _monitoringText, _monitoringSummaryGlyph, row) + gap;
+
+        // Height follows the number of visible rows, with the same compact
+        // bottom margin and button bar independently of headset capabilities.
+        _contentLogicalHeight = (int)Math.Ceiling((row + ScaleTray(6)) * 96.0 / Math.Max(1, DeviceDpi))
+            + ButtonBarLogicalHeight;
+        NormalizeClientSizeForCurrentDpi();
+        _buttonBar.Bounds = new Rectangle(0,
+            ClientSize.Height - ScaleTray(ButtonBarLogicalHeight),
+            ClientSize.Width, ScaleTray(ButtonBarLogicalHeight));
+        _statusDivider.Bounds = new Rectangle(ScaleTray(9), ScaleTray(69),
+            ClientSize.Width - ScaleTray(18), ScaleTray(1));
+        _deviceImage.Bounds = new Rectangle(ScaleTray(8), ScaleTray(7), ScaleTray(48), ScaleTray(48));
+        _deviceName.Bounds = new Rectangle(ScaleTray(59), ScaleTray(7),
+            ClientSize.Width - ScaleTray(66), ScaleTray(34));
+        _statusDot.Bounds = new Rectangle(ScaleTray(59), ScaleTray(42), ScaleTray(18), ScaleTray(18));
+        _statusText.Bounds = new Rectangle(ScaleTray(80), ScaleTray(42),
+            ClientSize.Width - ScaleTray(87), ScaleTray(20));
+    }
+
+    private int ScaleTray(int logical) => PngIconCache.ScaleLogicalToInt(logical, DeviceDpi);
+
+    private int PlaceTrayRow(Label label, Label value, TraySummaryGlyphControl icon, int row)
+    {
+        int left = ScaleTray(29);
+        int right = ScaleTray(MenuLogicalWidth - 7);
+        int available = Math.Max(ScaleTray(1), right - left);
+        int line = ScaleTray(20);
+        int gap = ScaleTray(4);
+        int titleWidth = TextRenderer.MeasureText(label.Text, label.Font,
+            new Size(2000, line), TextFormatFlags.SingleLine).Width + ScaleTray(2);
+        int valueWidth = TextRenderer.MeasureText(value.Text, value.Font,
+            new Size(2000, line), TextFormatFlags.SingleLine).Width + ScaleTray(2);
+        int iconSize = ScaleTray(15);
+        icon.Bounds = new Rectangle(ScaleTray(9), row + (line - iconSize) / 2,
+            iconSize, iconSize);
+        label.AutoEllipsis = false;
+        value.AutoEllipsis = false;
+        if (titleWidth + gap + valueWidth <= available)
+        {
+            label.Bounds = new Rectangle(left, row, titleWidth, line);
+            value.Bounds = new Rectangle(left + titleWidth + gap, row,
+                available - titleWidth - gap, line);
+            return line;
+        }
+
+        int titleHeight = Math.Max(line, TextRenderer.MeasureText(label.Text, label.Font,
+            new Size(available, 500), TextFormatFlags.WordBreak).Height + ScaleTray(2));
+        int valueHeight = Math.Max(line, TextRenderer.MeasureText(value.Text, value.Font,
+            new Size(available, 500), TextFormatFlags.WordBreak).Height + ScaleTray(2));
+        label.Bounds = new Rectangle(left, row, available, titleHeight);
+        value.Bounds = new Rectangle(left, row + titleHeight + ScaleTray(1), available, valueHeight);
+        return titleHeight + ScaleTray(1) + valueHeight;
     }
 
     public void ApplyLocalization()
@@ -292,6 +429,8 @@ internal sealed class TrayContextMenuForm : Form
         _statusTitle.Text = Localization.Get("SidebarStatus", _settings.Language);
         _batteryTitle.Text = Localization.Get("SidebarBattery", _settings.Language);
         _microphoneTitle.Text = Localization.Get("SidebarMicrophone", _settings.Language);
+        _autoPowerOffTitle.Text = Localization.Get("SidebarAutoPowerOff", _settings.Language);
+        _monitoringTitle.Text = Localization.Get("SidebarMonitoringMode", _settings.Language);
         _toolTip?.SetToolTip(_settingsButton, Localization.Get("ContextMenuSettings", _settings.Language));
         _toolTip?.SetToolTip(_exitButton, Localization.Get("ContextMenuExit", _settings.Language));
         UpdateDevice(
@@ -312,7 +451,17 @@ internal sealed class TrayContextMenuForm : Form
         _batteryTitle.ForeColor = secondary;
         _batteryText.ForeColor = secondary;
         _microphoneTitle.ForeColor = secondary;
-        _microphoneText.ForeColor = secondary;
+        _microphoneText.ForeColor = foreground;
+        _batteryText.ForeColor = foreground;
+        _autoPowerOffTitle.ForeColor = secondary;
+        _monitoringTitle.ForeColor = secondary;
+        _autoPowerOffText.ForeColor = foreground;
+        _monitoringText.ForeColor = foreground;
+        _statusDivider.BackColor = dark ? Color.FromArgb(70, 74, 78) : Color.FromArgb(205, 211, 218);
+        _batterySummaryGlyph.DarkMode = dark;
+        _microphoneSummaryGlyph.DarkMode = dark;
+        _powerOffSummaryGlyph.DarkMode = dark;
+        _monitoringSummaryGlyph.DarkMode = dark;
         bool selected = !string.IsNullOrWhiteSpace(_settings.SelectedDevice);
         string normalized = NormalizeDeviceName(_settings.SelectedDevice);
         bool microphoneMonitoringSupported =
@@ -324,8 +473,7 @@ internal sealed class TrayContextMenuForm : Form
             microphoneMonitoringSupported &&
             _device.IsMicrophoneMuteStateKnown &&
             _device.IsMicrophoneMuted;
-        bool useMuteIcon = !selected || !microphoneMonitoringSupported || microphoneMuted;
-        SetMicrophoneIcon(dark, useMuteIcon);
+        // Hidden microphone icon is intentionally not loaded in the compact summary.
         _statusDot.Invalidate();
         _batteryIcon.DarkMode = dark;
         _settingsButton.DarkMode = dark;
@@ -372,16 +520,22 @@ internal sealed class TrayContextMenuForm : Form
     {
         Size expectedClientSize = new(
             PngIconCache.ScaleLogicalToInt(MenuLogicalWidth, DeviceDpi),
-            PngIconCache.ScaleLogicalToInt(MenuLogicalHeight, DeviceDpi));
+            PngIconCache.ScaleLogicalToInt(_contentLogicalHeight, DeviceDpi));
 
         if (ClientSize != expectedClientSize)
             ClientSize = expectedClientSize;
+        if (_buttonBar != null)
+            _buttonBar.Location = new Point(0,
+                ClientSize.Height - PngIconCache.ScaleLogicalToInt(ButtonBarLogicalHeight, DeviceDpi));
     }
 
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
         NormalizeClientSizeForCurrentDpi();
+        // Place icons and labels again at the new DPI, without changing the
+        // current visibility of device-specific rows.
+        ReflowStatusRows(_microphoneTitle.Visible, _autoPowerOffTitle.Visible, _monitoringTitle.Visible);
         _iconCache.ClearBitmaps();
         SetRoundedRegion();
         Invalidate(true);
@@ -608,6 +762,52 @@ internal sealed class TrayMenuButton : Control
             new RectangleF((Width - iconSize) / 2f, (Height - iconSize) / 2f, iconSize, iconSize),
             _dark,
             DeviceDpi);
+    }
+}
+
+// Thin wrapper over HBM's original theme PNG cache; no custom icon rendering.
+internal sealed class TraySummaryGlyphControl : Control
+{
+    private readonly PngIconCache _cache;
+    private string _iconKey;
+    private bool _dark;
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public string IconKey
+    {
+        get => _iconKey;
+        set { if (_iconKey == value) return; _iconKey = value; Invalidate(); }
+    }
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool DarkMode
+    {
+        get => _dark;
+        set { if (_dark == value) return; _dark = value; Invalidate(); }
+    }
+
+    public TraySummaryGlyphControl(PngIconCache cache, string iconKey)
+    {
+        _cache = cache;
+        _iconKey = iconKey;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+        // WinForms throws when Transparent is assigned before the style is enabled.
+        BackColor = Color.Transparent;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        try
+        {
+            _cache.Draw(e.Graphics, _iconKey, new RectangleF(0, 0, Width, Height), _dark, DeviceDpi);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+        {
+            System.Diagnostics.Debug.WriteLine($"Tray status glyph unavailable: {ex.Message}");
+        }
     }
 }
 

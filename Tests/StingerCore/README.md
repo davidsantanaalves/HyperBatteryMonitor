@@ -65,6 +65,13 @@ implementation. Automated tests do not claim physical validation of
 Kingston/PlayStation receivers, Windows device discovery, charging transitions,
 full-charge behavior, DTS-specific voltage calibration, multiple simultaneous DTS
 receivers, or visual UI interaction after a forced listener failure. These tests
-exercise the integrated Beta 3 production source. Physical DTS battery and
+exercise the consolidated Beta 4 production source, retaining the Beta 3 DTS regressions. Physical DTS battery and
 microphone validation was reported by @shapkees in PR #16.
 [PR #16](https://github.com/davidsantanaalves/HyperBatteryMonitor/pull/16)
+
+
+## Beta 4 reconciliation coverage
+
+The cross-platform runner also compiles the production Cloud III driver because the shared monitor now references its Listen-only path. The settings-mode enum is a test-only compile boundary; its values are checked against the production enum by the Windows contract tests. No Cloud III HID connection is opened by these DTS scenarios.
+
+The 17 original UI cases retain receiver verification, capability, theme, blink and pending-preference coverage. Assertions now inspect the approved summary glyphs and localized Active/Inactive/`...` text. Six additional Beta 4 contract groups cover per-model defaults/overrides, old-profile and verified-cache serialization/normalization, four disabled offline choices, modal cancel/failure/retry lifecycle, tooltip bounds/offline values in all 11 locales, and verified DTS microphone data in the new tooltip. They use in-memory state, without opening HID, showing application windows or saving preferences. The modal callback tests do not certify physical HID failure behavior.

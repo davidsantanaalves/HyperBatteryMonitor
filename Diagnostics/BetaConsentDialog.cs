@@ -14,7 +14,8 @@ internal sealed class BetaConsentDialog : Form
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    internal BetaConsentDialog(AppLanguage language, AppTheme theme, bool reviewOnly = false)
+    internal BetaConsentDialog(AppLanguage language, AppTheme theme, bool reviewOnly = false,
+        int? temporaryCaptureHours = null)
     {
         string T(string key) => Localization.Get(key, language);
         bool dark = IsDarkTheme(theme);
@@ -60,7 +61,9 @@ internal sealed class BetaConsentDialog : Form
         // scrollbar, it is only visible when the localized text actually overflows.
         RichTextBox description = new()
         {
-            Text = T("BetaDiagnosticsConsentBody") + Environment.NewLine + Environment.NewLine +
+            Text = (temporaryCaptureHours.HasValue
+                ? string.Format(T("BetaDiagnosticsTemporaryConsentBody"), temporaryCaptureHours.Value)
+                : T("BetaDiagnosticsConsentBody")) + Environment.NewLine + Environment.NewLine +
                 T("BetaDiagnosticsCloudSyncNotice"),
             ReadOnly = true, Multiline = true, ScrollBars = RichTextBoxScrollBars.Vertical,
             Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
@@ -110,10 +113,14 @@ internal sealed class BetaConsentDialog : Form
         // Reviewing previously accepted terms is informational only: it must
         // never expose opt-in/opt-out actions or alter persisted consent.
         Button? agree = reviewOnly ? null :
-            CreateButton(T("BetaDiagnosticsAccept"), "✓", DialogResult.OK, true);
+            CreateButton(T(temporaryCaptureHours.HasValue
+                ? "BetaDiagnosticsTemporaryConsentAccept" : "BetaDiagnosticsAccept"),
+                "✓", DialogResult.OK, true);
         Button dismiss = reviewOnly
             ? CreateButton(T("BetaDiagnosticsClose"), "✕", DialogResult.Cancel, true)
-            : CreateButton(T("BetaDiagnosticsDecline"), "✕", DialogResult.Cancel, false);
+            : CreateButton(T(temporaryCaptureHours.HasValue
+                ? "BetaDiagnosticsTemporaryConsentDecline" : "BetaDiagnosticsDecline"),
+                "✕", DialogResult.Cancel, false);
         if (agree is not null)
             buttons.Controls.Add(agree);
         buttons.Controls.Add(dismiss);

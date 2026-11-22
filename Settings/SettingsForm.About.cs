@@ -325,18 +325,16 @@ public sealed partial class SettingsForm : Form
         intro.Controls.Add(introTitle);
         intro.Controls.Add(introDescription);
 
-        RoundedPanel statusCard = Card();
         Label statusText = Text(string.Empty, 10f, true);
         ToggleSwitchControl toggle = new()
         {
             Size = new Size(S(44), S(25)),
             DarkMode = dark,
-            Checked = _settings.BetaDiagnosticsConsentVersion == BetaDiagnostics.ConsentVersion
-                && BetaDiagnostics.IsEnabled,
+            Checked = BetaDiagnostics.IsEssentialLoggingEnabled,
             AccessibleName = L("BetaDiagnosticsDialogTitle")
         };
-        statusCard.Controls.Add(statusText);
-        statusCard.Controls.Add(toggle);
+        intro.Controls.Add(statusText);
+        intro.Controls.Add(toggle);
 
         RoundedPanel detailed = Card();
         PngIconControl detailedIcon = Icon("diagnostics", 27);
@@ -345,6 +343,7 @@ public sealed partial class SettingsForm : Form
         Label detailedState = Text(string.Empty, 8.8f);
         ActionButton startDetailed = Button(L("BetaDiagnosticsDetailedStart"), true);
         ActionButton stopDetailed = Button(L("BetaDiagnosticsDetailedStop"), false);
+        stopDetailed.DangerAccent = true;
         detailed.Controls.Add(detailedIcon);
         detailed.Controls.Add(detailedTitle);
         detailed.Controls.Add(detailedDescription);
@@ -361,6 +360,8 @@ public sealed partial class SettingsForm : Form
         storage.Controls.Add(storageTitle);
         storage.Controls.Add(storageUsage);
         storage.Controls.Add(clearLogs);
+        ActionButton openLogs = Button(L("BetaDiagnosticsOpenLogsShort"), false);
+        storage.Controls.Add(openLogs);
 
         RoundedPanel privacy = Card();
         Panel privacyGlyph = OutlineGlyph(true);
@@ -374,15 +375,12 @@ public sealed partial class SettingsForm : Form
         retention.Controls.Add(retentionGlyph);
         retention.Controls.Add(retentionText);
 
-        RoundedPanel actions = Card();
-        PngIconControl actionsIcon = Icon("config", 25);
-        Label actionsTitle = Text(L("BetaDiagnosticsActions"), 9.5f, true);
-        ActionButton openLogs = Button(L("BetaDiagnosticsOpenLogsShort"), false);
+        // Footer matches the main Settings window: separator and a standalone Close.
+        Panel footerDivider = new() { BackColor = border, Height = S(1) };
+        canvas.Controls.Add(footerDivider);
         ActionButton close = Button(L("BetaDiagnosticsClose"), true);
-        actions.Controls.Add(actionsIcon);
-        actions.Controls.Add(actionsTitle);
-        actions.Controls.Add(openLogs);
-        actions.Controls.Add(close);
+        close.OutsideBackColor = background;
+        canvas.Controls.Add(close);
 
         LinkLabel terms = new()
         {
@@ -417,18 +415,30 @@ public sealed partial class SettingsForm : Form
             headerTitle.Bounds = new Rectangle(left + S(52), S(12),
                 Math.Max(1, cardWidth - S(52)), S(47));
 
-            intro.Bounds = new Rectangle(left, S(68), cardWidth, S(74));
-            introIcon.Bounds = new Rectangle(S(19), S(23), S(25), S(25));
-            introTitle.Bounds = new Rectangle(textLeft, S(8), textWidth, S(27));
-            introDescription.Bounds = new Rectangle(textLeft, S(34), textWidth, S(34));
+            const int introTop = 68;
+            const int introHeight = 124;
+            const int detailedHeight = 139;
+            bool narrow = cardWidth < S(565);
+            int storageHeight = narrow ? 127 : 88;
+            int detailedTop = introTop + introHeight + 8;
+            int storageTop = detailedTop + detailedHeight + 8;
+            int privacyTop = storageTop + storageHeight + 8;
+            int retentionTop = privacyTop + 85 + 8;
+            int termsTop = retentionTop + 69 + 4;
+            int dividerTop = termsTop + 24 + 5;
+            int footerTop = dividerTop + 14;
+            int requiredHeight = footerTop + 34 + 16;
 
-            statusCard.Bounds = new Rectangle(left, S(148), cardWidth, S(53));
-            statusText.Bounds = new Rectangle(S(19), S(8),
-                Math.Max(1, cardWidth - S(100)), S(36));
-            toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)), S(14),
+            intro.Bounds = new Rectangle(left, S(introTop), cardWidth, S(introHeight));
+            introIcon.Bounds = new Rectangle(S(19), S(21), S(25), S(25));
+            introTitle.Bounds = new Rectangle(textLeft, S(9), textWidth, S(28));
+            introDescription.Bounds = new Rectangle(textLeft, S(36), textWidth, S(38));
+            statusText.Bounds = new Rectangle(textLeft, S(83),
+                Math.Max(1, cardWidth - textLeft - S(76)), S(29));
+            toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)), S(87),
                 S(44), S(25));
 
-            detailed.Bounds = new Rectangle(left, S(209), cardWidth, S(139));
+            detailed.Bounds = new Rectangle(left, S(detailedTop), cardWidth, S(detailedHeight));
             detailedIcon.Bounds = new Rectangle(S(15), S(14), S(27), S(27));
             detailedTitle.Bounds = new Rectangle(S(54), S(8),
                 Math.Max(1, cardWidth - S(74)), S(30));
@@ -440,43 +450,53 @@ public sealed partial class SettingsForm : Form
                 S(91), S(195), S(34));
             stopDetailed.Bounds = startDetailed.Bounds;
 
-            storage.Bounds = new Rectangle(left, S(356), cardWidth, S(78));
-            storageIcon.Bounds = new Rectangle(S(15), S(19), S(36), S(36));
-            storageTitle.Bounds = new Rectangle(S(63), S(8),
-                Math.Max(1, cardWidth - S(270)), S(30));
-            storageUsage.Bounds = new Rectangle(S(63), S(36),
-                Math.Max(1, cardWidth - S(270)), S(30));
-            clearLogs.Bounds = new Rectangle(Math.Max(S(8), cardWidth - S(183)),
-                S(23), S(164), S(34));
+            storage.Bounds = new Rectangle(left, S(storageTop), cardWidth, S(storageHeight));
+            storageIcon.Bounds = new Rectangle(S(15), S(16), S(36), S(36));
+            storageTitle.Bounds = new Rectangle(S(63), S(7),
+                narrow ? Math.Max(1, cardWidth - S(84)) : Math.Max(1, cardWidth - S(385)), S(28));
+            storageUsage.Bounds = new Rectangle(S(63), S(35),
+                narrow ? Math.Max(1, cardWidth - S(84)) : Math.Max(1, cardWidth - S(385)), S(30));
+            if (narrow)
+            {
+                int gap = S(10);
+                int buttonWidth = Math.Max(S(100), (cardWidth - S(36) - gap) / 2);
+                openLogs.Bounds = new Rectangle(S(13), S(81), buttonWidth, S(34));
+                clearLogs.Bounds = new Rectangle(S(13) + buttonWidth + gap,
+                    S(81), buttonWidth, S(34));
+            }
+            else
+            {
+                int buttonWidth = S(139);
+                int gap = S(8);
+                int firstX = cardWidth - S(17) - 2 * buttonWidth - gap;
+                openLogs.Bounds = new Rectangle(firstX, S(32), buttonWidth, S(34));
+                clearLogs.Bounds = new Rectangle(firstX + buttonWidth + gap,
+                    S(32), buttonWidth, S(34));
+            }
 
-            privacy.Bounds = new Rectangle(left, S(442), cardWidth, S(85));
+            privacy.Bounds = new Rectangle(left, S(privacyTop), cardWidth, S(85));
             privacyGlyph.Bounds = new Rectangle(S(16), S(24), S(36), S(36));
             privacyText.Bounds = new Rectangle(textLeft, S(9), textWidth, S(67));
 
-            retention.Bounds = new Rectangle(left, S(535), cardWidth, S(69));
+            retention.Bounds = new Rectangle(left, S(retentionTop), cardWidth, S(69));
             retentionGlyph.Bounds = new Rectangle(S(16), S(16), S(36), S(36));
             retentionText.Bounds = new Rectangle(textLeft, S(7), textWidth, S(56));
 
-            actions.Bounds = new Rectangle(left, S(612), cardWidth, S(70));
-            actionsIcon.Bounds = new Rectangle(S(14), S(6), S(25), S(25));
-            actionsTitle.Bounds = new Rectangle(S(47), S(7),
-                Math.Max(1, cardWidth - S(58)), S(23));
-            int buttonGap = S(12);
-            int buttonPad = S(14);
-            int buttonWidth = Math.Max(S(1), (cardWidth - 2 * buttonPad - buttonGap) / 2);
-            openLogs.Bounds = new Rectangle(buttonPad, S(32), buttonWidth, S(32));
-            close.Bounds = new Rectangle(buttonPad + buttonWidth + buttonGap, S(32),
-                Math.Max(1, cardWidth - (buttonPad + buttonWidth + buttonGap) - buttonPad), S(32));
-
-            terms.Bounds = new Rectangle(left + S(5), S(686),
+            terms.Bounds = new Rectangle(left + S(5), S(termsTop),
                 Math.Max(1, cardWidth - S(10)), S(24));
+            footerDivider.Bounds = new Rectangle(left, S(dividerTop), cardWidth, S(1));
+            close.Bounds = new Rectangle(left + cardWidth - S(166), S(footerTop), S(166), S(34));
+            int canvasHeight = S(requiredHeight);
+            if (canvas.Height != canvasHeight) canvas.Height = canvasHeight;
         }
         viewport.SizeChanged += (_, _) => LayoutDiagnostics();
         LayoutDiagnostics();
 
+        bool maintenanceBusy = false;
         close.Click += (_, _) => modal.Close();
         openLogs.Click += (_, _) =>
         {
+            UpdateStorage();
             try
             {
                 if (!Directory.Exists(BetaDiagnostics.LogsFolder))
@@ -500,25 +520,45 @@ public sealed partial class SettingsForm : Form
             using BetaConsentDialog review = new(_selectedLanguage, _selectedTheme,
                 reviewOnly: true);
             review.ShowDialog(modal);
+            UpdateStorage();
         };
         modal.CancelButton = close;
 
-
-        void UpdateStorage()
+        int UpdateStorage()
         {
             var (files, bytes) = BetaDiagnostics.GetStorageUsage();
-            string megabytes = (bytes / (1024d * 1024d)).ToString("0.0",
-                System.Globalization.CultureInfo.CurrentCulture);
-            storageUsage.Text = string.Format(L("BetaDiagnosticsStorageUsage"), files, megabytes);
-            clearLogs.Enabled = files > 0;
+            var culture = System.Globalization.CultureInfo.CurrentCulture;
+            string size;
+            string unitKey;
+            if (bytes < 1024)
+            {
+                size = bytes.ToString("N0", culture);
+                unitKey = "BetaDiagnosticsStorageUnitBytes";
+            }
+            else if (bytes < 1024L * 1024L)
+            {
+                size = (bytes / 1024d).ToString("0.#", culture);
+                unitKey = "BetaDiagnosticsStorageUnitKilobytes";
+            }
+            else
+            {
+                size = (bytes / (1024d * 1024d)).ToString("0.#", culture);
+                unitKey = "BetaDiagnosticsStorageUnitMegabytes";
+            }
+
+            storageUsage.Text = string.Format(culture, L("BetaDiagnosticsStorageUsage"),
+                files, size, L(unitKey));
+            clearLogs.Enabled = !maintenanceBusy;
+            return files;
         }
 
+        // The timer updates only the remaining capture time. Storage is refreshed
+        // on modal opening and explicit user actions, never by periodic disk scans.
         using System.Windows.Forms.Timer captureStatusTimer = new() { Interval = 1000 };
-        bool maintenanceBusy = false;
         bool handling = false;
         void ShowState()
         {
-            bool active = BetaDiagnostics.IsEnabled;
+            bool active = BetaDiagnostics.IsEssentialLoggingEnabled;
             statusText.Text = L("BetaDiagnosticsStatus") + "  " +
                 (active ? "●  " + L("BetaDiagnosticsActive") : "○  " + L("BetaDiagnosticsInactive"));
             statusText.ForeColor = active ? (dark ? Color.FromArgb(123, 224, 145) : Color.FromArgb(0, 130, 62)) : subtle;
@@ -529,9 +569,9 @@ public sealed partial class SettingsForm : Form
                 handling = false;
             }
             DateTimeOffset? ends = BetaDiagnostics.DetailedCaptureEndsAtUtc;
-            bool detailedActive = active && ends.HasValue;
+            bool detailedActive = BetaDiagnostics.IsDetailedCaptureActive && ends.HasValue;
             startDetailed.Visible = !detailedActive;
-            startDetailed.Enabled = active && !detailedActive && !maintenanceBusy;
+            startDetailed.Enabled = !detailedActive && !maintenanceBusy;
             stopDetailed.Visible = detailedActive;
             stopDetailed.Enabled = detailedActive && !maintenanceBusy;
             toggle.Enabled = !maintenanceBusy;
@@ -542,95 +582,57 @@ public sealed partial class SettingsForm : Form
         }
         startDetailed.Click += (_, _) =>
         {
-            if (!BetaDiagnostics.IsEnabled) return;
-            using Form durationModal = new()
+            if (maintenanceBusy) return;
+            UpdateStorage();
+            int? hours = ShowDetailedCaptureDurationDialog(modal, dark,
+                background, cardFill, fg, subtle, border);
+            UpdateStorage();
+            if (!hours.HasValue) return;
+            bool temporaryConsent = !BetaDiagnostics.IsEssentialLoggingEnabled;
+            if (temporaryConsent)
             {
-                Text = L("BetaDiagnosticsDurationTitle"),
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.None,
-                ClientSize = new Size(S(430), S(212)),
-                AutoScaleMode = AutoScaleMode.None,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                ShowInTaskbar = false,
-                BackColor = background,
-                ForeColor = fg,
-                Font = new Font("Segoe UI", 9f)
-            };
-            Label prompt = Text(L("BetaDiagnosticsDurationPrompt"), 9f, false);
-            prompt.Bounds = new Rectangle(S(20), S(16), S(390), S(48));
-            durationModal.Controls.Add(prompt);
-            ComboBox durations = new()
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10f),
-                BackColor = cardFill,
-                ForeColor = fg,
-                Bounds = new Rectangle(S(20), S(77), S(390), S(34))
-            };
-            int[] allowedHours = { 1, 3, 6, 12, 24 };
-            foreach (int hours in allowedHours)
-                durations.Items.Add(string.Format(L("BetaDiagnosticsDurationHours"), hours));
-            durations.SelectedIndex = 0;
-            durationModal.Controls.Add(durations);
-            Label privacyNote = Text(L("BetaDiagnosticsDetailedPrivacyNote"), 8.2f, false, subtle);
-            privacyNote.Bounds = new Rectangle(S(20), S(118), S(390), S(34));
-            durationModal.Controls.Add(privacyNote);
-            Button begin = new()
-            {
-                Text = L("BetaDiagnosticsDetailedStart"),
-                Bounds = new Rectangle(S(242), S(162), S(168), S(32)),
-                BackColor = dark ? Color.FromArgb(35, 99, 132) : Color.FromArgb(221, 241, 252),
-                ForeColor = fg,
-                FlatStyle = FlatStyle.Flat,
-                DialogResult = DialogResult.None
-            };
-            begin.FlatAppearance.BorderSize = 0;
-            Button cancelDuration = new()
-            {
-                Text = L("Cancel"),
-                Bounds = new Rectangle(S(102), S(162), S(126), S(32)),
-                BackColor = cardFill,
-                ForeColor = fg,
-                FlatStyle = FlatStyle.Flat,
-                DialogResult = DialogResult.Cancel
-            };
-            cancelDuration.FlatAppearance.BorderSize = 0;
-            durationModal.Controls.Add(cancelDuration);
-            durationModal.CancelButton = cancelDuration;
-            durationModal.SizeChanged += (_, _) =>
-            {
-                durationModal.Region?.Dispose();
-                using GraphicsPath rounded = GraphicsExtensions.CreateRoundedPath(
-                    new RectangleF(0.5f, 0.5f, Math.Max(1, durationModal.Width - 1f),
-                        Math.Max(1, durationModal.Height - 1f)), S(10));
-                durationModal.Region = new Region(rounded);
-            };
-            begin.Click += (_, _) =>
-            {
-                if (BetaDiagnostics.StartDetailedCapture(allowedHours[durations.SelectedIndex]))
+                // Ephemeral permission: never write consent or Settings here.
+                // Decline closes the duration flow and returns to Diagnostics.
+                using BetaConsentDialog consent = new(_selectedLanguage, _selectedTheme,
+                    temporaryCaptureHours: hours.Value);
+                DialogResult consentResult = consent.ShowDialog(modal);
+                UpdateStorage();
+                if (consentResult != DialogResult.OK)
                 {
-                    durationModal.DialogResult = DialogResult.OK;
-                    durationModal.Close();
+                    ShowState();
+                    return;
                 }
-            };
-            durationModal.Controls.Add(begin);
-            durationModal.AcceptButton = begin;
-            durationModal.ShowDialog(modal);
+            }
+            if (!BetaDiagnostics.StartDetailedCapture(hours.Value,
+                allowTemporary: temporaryConsent))
+                ShowDiagnosticsResultDialog(modal, L("BetaDiagnosticsCaptureStartFailure"),
+                    false, dark, background, cardFill, fg, border);
             ShowState();
+            UpdateStorage();
         };
         stopDetailed.Click += (_, _) =>
         {
             BetaDiagnostics.StopDetailedCapture();
             ShowState();
+            UpdateStorage();
         };
         clearLogs.Click += async (_, _) =>
         {
-            if (MessageBox.Show(modal, L("BetaDiagnosticsClearConfirm"),
-                L("BetaDiagnosticsClearLogs"), MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            if (maintenanceBusy) return;
+            if (UpdateStorage() == 0)
+            {
+                ShowDiagnosticsResultDialog(modal, L("BetaDiagnosticsNoLogsToClear"),
+                    true, dark, background, cardFill, fg, border);
+                UpdateStorage();
                 return;
+            }
+            if (!ShowDiagnosticsConfirmationDialog(modal, L("BetaDiagnosticsClearLogs"),
+                L("BetaDiagnosticsClearConfirm"), dark, background, cardFill, fg, subtle, border,
+                L("Yes"), L("No"), destructive: true))
+            {
+                UpdateStorage();
+                return;
+            }
             maintenanceBusy = true;
             clearLogs.Enabled = false;
             toggle.Enabled = false;
@@ -643,10 +645,9 @@ public sealed partial class SettingsForm : Form
             if (modal.IsDisposed) return;
             UpdateStorage();
             ShowState();
-            MessageBox.Show(modal,
+            ShowDiagnosticsResultDialog(modal,
                 L(success ? "BetaDiagnosticsClearSuccess" : "BetaDiagnosticsClearFailure"),
-                L("BetaDiagnosticsDialogTitle"), MessageBoxButtons.OK,
-                success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                success, dark, background, cardFill, fg, border);
         };
         captureStatusTimer.Tick += (_, _) => ShowState();
         modal.Shown += (_, _) => captureStatusTimer.Start();
@@ -654,6 +655,7 @@ public sealed partial class SettingsForm : Form
         toggle.CheckedChanged += (_, _) =>
         {
             if (handling) return;
+            UpdateStorage();
             bool enable = toggle.Checked;
             if (enable)
             {
@@ -661,6 +663,7 @@ public sealed partial class SettingsForm : Form
                 if (consent.ShowDialog(modal) != DialogResult.OK)
                 {
                     ShowState();
+                    UpdateStorage();
                     return;
                 }
             }
@@ -682,7 +685,7 @@ public sealed partial class SettingsForm : Form
                 else
                 {
                     BetaDiagnostics.Write("Diagnostics.DisabledFromAbout");
-                    BetaDiagnostics.Stop();
+                    BetaDiagnostics.DisableEssentialLogging();
                 }
             }
             catch
@@ -692,6 +695,7 @@ public sealed partial class SettingsForm : Form
                     MessageBoxIcon.Warning);
             }
             ShowState();
+            UpdateStorage();
         };
         ShowState();
         UpdateStorage();
@@ -745,4 +749,548 @@ public sealed partial class SettingsForm : Form
             // Ignore shell launch failures; the About page remains usable.
         }
     }
+
+
+    private int? ShowDetailedCaptureDurationDialog(Form owner, bool dark,
+        Color background, Color cardFill, Color foreground, Color subtle, Color border)
+    {
+        // Measure the localized captions, but never force a minimum dialog width
+        // larger than the actual monitor work area (notably at 200% DPI).
+        string cancelCaption = L("Cancel");
+        string startCaption = L("BetaDiagnosticsDetailedStart");
+        string promptCaption = L("BetaDiagnosticsDurationPrompt");
+        string privacyCaption = L("BetaDiagnosticsDetailedPrivacyNote");
+        using Font actionFont = new("Segoe UI", 8.8f);
+        using Font promptFont = new("Segoe UI", 9.2f);
+        using Font privacyFont = new("Segoe UI", 8.4f);
+        int ButtonWidth(string caption, int minimumLogicalWidth) => Math.Max(
+            ScaleUi(minimumLogicalWidth),
+            TextRenderer.MeasureText(caption, actionFont,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine).Width + ScaleUi(30));
+
+        int cancelWidth = ButtonWidth(cancelCaption, 100);
+        int startWidth = ButtonWidth(startCaption, 128);
+        int footerMargin = ScaleUi(24);
+        int buttonGap = ScaleUi(12);
+        int neededWidth = footerMargin * 2 + cancelWidth + buttonGap + startWidth;
+        Rectangle workArea = Screen.FromControl(owner).WorkingArea;
+        int screenMargin = ScaleUi(12);
+        int availableWidth = Math.Max(1, workArea.Width - screenMargin * 2);
+        int availableHeight = Math.Max(1, workArea.Height - screenMargin * 2);
+        int dialogWidth = Math.Min(Math.Max(ScaleUi(448), neededWidth), availableWidth);
+
+        // Preserve the existing 448x250 logical layout when it fits. Reflow the
+        // duration choices, text and actions only on constrained displays.
+        // If the content is taller than the work area, let users scroll to the
+        // bottom actions rather than cropping them off-screen.
+        int cardLeft = ScaleUi(18);
+        int cardTop = ScaleUi(58);
+        int chipGap = ScaleUi(10);
+        int chipHeight = ScaleUi(34);
+        int[] allowedHours = { 1, 3, 6, 12, 24 };
+
+        (int CardWidth, int CardHeight, int InnerWidth, int PromptHeight,
+            int ChipsTop, int ChipWidth, int ChipColumns, int ChipRows,
+            int NoteTop, int NoteHeight, int ActionWidth, int ActionHeight,
+            int ActionsTop, int NeededHeight, bool StackActions) MeasureLayout(int contentWidth)
+        {
+            int cardWidth = Math.Max(1, contentWidth - ScaleUi(36));
+            int innerWidth = Math.Max(1, cardWidth - ScaleUi(32));
+            TextFormatFlags wrap = TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak;
+            int promptHeight = Math.Max(ScaleUi(28),
+                TextRenderer.MeasureText(promptCaption, promptFont,
+                    new Size(innerWidth, int.MaxValue), wrap).Height + ScaleUi(2));
+            int chipColumns = allowedHours.Length;
+            while (chipColumns > 1 &&
+                (innerWidth - chipGap * (chipColumns - 1)) / chipColumns < ScaleUi(50))
+                chipColumns--;
+            int chipWidth = Math.Min(ScaleUi(68),
+                Math.Max(1, (innerWidth - chipGap * (chipColumns - 1)) / chipColumns));
+            int chipRows = (allowedHours.Length + chipColumns - 1) / chipColumns;
+            int chipsTop = ScaleUi(14) + promptHeight;
+            int noteTop = chipsTop + chipRows * chipHeight + (chipRows - 1) * chipGap + ScaleUi(4);
+            int noteHeight = Math.Max(ScaleUi(28),
+                TextRenderer.MeasureText(privacyCaption, privacyFont,
+                    new Size(innerWidth, int.MaxValue), wrap).Height + ScaleUi(2));
+            int cardHeight = Math.Max(ScaleUi(122), noteTop + noteHeight + ScaleUi(14));
+
+            int actionWidth = Math.Max(1, contentWidth - footerMargin * 2);
+            int actionHeight = Math.Max(ScaleUi(32), Math.Max(
+                TextRenderer.MeasureText(cancelCaption, actionFont,
+                    new Size(Math.Max(1, Math.Min(cancelWidth, actionWidth) - ScaleUi(30)),
+                        int.MaxValue), wrap).Height + ScaleUi(12),
+                TextRenderer.MeasureText(startCaption, actionFont,
+                    new Size(Math.Max(1, Math.Min(startWidth, actionWidth) - ScaleUi(30)),
+                        int.MaxValue), wrap).Height + ScaleUi(12)));
+            bool stackActions = neededWidth > contentWidth;
+            int actionsTop = cardTop + cardHeight + ScaleUi(20);
+            int neededHeight = actionsTop + actionHeight * (stackActions ? 2 : 1) +
+                (stackActions ? ScaleUi(10) : 0) + ScaleUi(18);
+            return (cardWidth, cardHeight, innerWidth, promptHeight, chipsTop,
+                chipWidth, chipColumns, chipRows, noteTop, noteHeight,
+                actionWidth, actionHeight, actionsTop, neededHeight, stackActions);
+        }
+
+        int contentWidth = dialogWidth;
+        var layout = MeasureLayout(contentWidth);
+        if (layout.NeededHeight > availableHeight)
+        {
+            // The vertical scrollbar consumes horizontal space; remeasure once
+            // so its presence cannot push the last chip/button out of view.
+            contentWidth = Math.Max(1, dialogWidth - SystemInformation.VerticalScrollBarWidth);
+            layout = MeasureLayout(contentWidth);
+        }
+        int dialogHeight = Math.Min(layout.NeededHeight, availableHeight);
+        using Form dialog = CreateDiagnosticsDialogShell(L("BetaDiagnosticsDurationTitle"),
+            dark, background, foreground, new Size(dialogWidth, dialogHeight));
+        dialog.StartPosition = FormStartPosition.Manual;
+        dialog.Location = new Point(
+            workArea.Left + (workArea.Width - dialog.Width) / 2,
+            workArea.Top + (workArea.Height - dialog.Height) / 2);
+        if (layout.NeededHeight > dialogHeight)
+        {
+            dialog.AutoScroll = true;
+            dialog.AutoScrollMinSize = new Size(0, layout.NeededHeight);
+        }
+
+        RoundedPanel card = new()
+        {
+            Parent = dialog,
+            BackColor = cardFill,
+            OutsideBackColor = background,
+            BorderColor = border,
+            Bounds = new Rectangle(cardLeft, cardTop,
+                layout.CardWidth, layout.CardHeight)
+        };
+        _ = new Label
+        {
+            Parent = card,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI", 9.2f),
+            Text = promptCaption,
+            Bounds = new Rectangle(ScaleUi(16), ScaleUi(14), layout.InnerWidth, layout.PromptHeight)
+        };
+        _ = new Label
+        {
+            Parent = card,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            ForeColor = subtle,
+            Font = new Font("Segoe UI", 8.4f),
+            Text = privacyCaption,
+            Bounds = new Rectangle(ScaleUi(16), layout.NoteTop,
+                layout.InnerWidth, layout.NoteHeight)
+        };
+
+        int selectedIndex = 0;
+        List<DurationChoiceButton> choiceButtons = new();
+        void RefreshDurationButtons()
+        {
+            for (int i = 0; i < choiceButtons.Count; i++)
+                choiceButtons[i].SelectedChoice = i == selectedIndex;
+        }
+
+        for (int i = 0; i < allowedHours.Length; i++)
+        {
+            int index = i;
+            int row = i / layout.ChipColumns;
+            int col = i % layout.ChipColumns;
+            int rowCount = Math.Min(layout.ChipColumns, allowedHours.Length - row * layout.ChipColumns);
+            int rowWidth = rowCount * layout.ChipWidth + (rowCount - 1) * chipGap;
+            int chipsLeft = ScaleUi(16) + Math.Max(0, (layout.InnerWidth - rowWidth) / 2);
+            DurationChoiceButton button = new()
+            {
+                Parent = card,
+                DarkMode = dark,
+                Text = $"{allowedHours[i]} h",
+                Bounds = new Rectangle(chipsLeft + col * (layout.ChipWidth + chipGap),
+                    layout.ChipsTop + row * (chipHeight + chipGap),
+                    layout.ChipWidth, chipHeight),
+                TabStop = true,
+                SelectedChoice = i == selectedIndex
+            };
+            button.Click += (_, _) =>
+            {
+                selectedIndex = index;
+                RefreshDurationButtons();
+            };
+            choiceButtons.Add(button);
+        }
+        RefreshDurationButtons();
+
+        int actionsRight = contentWidth - footerMargin;
+        int cancelY = layout.ActionsTop;
+        int startY = layout.ActionsTop + (layout.StackActions ? layout.ActionHeight + ScaleUi(10) : 0);
+        ActionButton cancelButton = CreateDialogActionButton(cancelCaption, dark, false, background);
+        cancelButton.Parent = dialog;
+        cancelButton.Bounds = new Rectangle(
+            actionsRight - (layout.StackActions ? Math.Min(cancelWidth, layout.ActionWidth) :
+                Math.Min(startWidth, layout.ActionWidth) + buttonGap + cancelWidth),
+            cancelY, Math.Min(cancelWidth, layout.ActionWidth), layout.ActionHeight);
+        cancelButton.DialogResult = DialogResult.Cancel;
+
+        ActionButton startButton = CreateDialogActionButton(startCaption, dark, true, background);
+        startButton.Parent = dialog;
+        startButton.Bounds = new Rectangle(
+            actionsRight - Math.Min(startWidth, layout.ActionWidth),
+            startY, Math.Min(startWidth, layout.ActionWidth), layout.ActionHeight);
+        startButton.Click += (_, _) =>
+        {
+            dialog.Tag = allowedHours[selectedIndex];
+            dialog.DialogResult = DialogResult.OK;
+            dialog.Close();
+        };
+        dialog.AcceptButton = startButton;
+        dialog.CancelButton = cancelButton;
+
+        return dialog.ShowDialog(owner) == DialogResult.OK && dialog.Tag is int hours
+            ? hours
+            : null;
+    }
+
+    private bool ShowDiagnosticsConfirmationDialog(Form owner, string title, string message,
+        bool dark, Color background, Color cardFill, Color foreground, Color subtle,
+        Color border, string confirmText, string cancelText, bool destructive)
+    {
+        using Form dialog = CreateDiagnosticsDialogShell(title, dark, background, foreground,
+            new Size(ScaleUi(452), ScaleUi(214)));
+        RoundedPanel card = new()
+        {
+            Parent = dialog,
+            BackColor = cardFill,
+            OutsideBackColor = background,
+            BorderColor = border,
+            Bounds = new Rectangle(ScaleUi(18), ScaleUi(58), dialog.ClientSize.Width - ScaleUi(36),
+                ScaleUi(92))
+        };
+
+        _ = new WarningGlyphPanel
+        {
+            Parent = card,
+            ForeColor = destructive ? Color.FromArgb(234, 179, 8) : foreground,
+            BackColor = Color.Transparent,
+            Bounds = new Rectangle(ScaleUi(16), ScaleUi(20), ScaleUi(28), ScaleUi(28))
+        };
+        _ = new Label
+        {
+            Parent = card,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI", 9f),
+            Text = message,
+            Bounds = new Rectangle(ScaleUi(56), ScaleUi(16), card.Width - ScaleUi(72), ScaleUi(48))
+        };
+
+        ActionButton cancelButton = CreateDialogActionButton(cancelText, dark, false, background);
+        cancelButton.Parent = dialog;
+        cancelButton.Bounds = new Rectangle(dialog.ClientSize.Width - ScaleUi(290),
+            dialog.ClientSize.Height - ScaleUi(50), ScaleUi(128), ScaleUi(32));
+        cancelButton.DialogResult = DialogResult.Cancel;
+
+        ActionButton confirmButton = CreateDialogActionButton(confirmText, dark, true, background);
+        confirmButton.Parent = dialog;
+        confirmButton.Bounds = new Rectangle(dialog.ClientSize.Width - ScaleUi(152),
+            dialog.ClientSize.Height - ScaleUi(50), ScaleUi(128), ScaleUi(32));
+        confirmButton.Click += (_, _) =>
+        {
+            dialog.DialogResult = DialogResult.Yes;
+            dialog.Close();
+        };
+
+        dialog.AcceptButton = confirmButton;
+        dialog.CancelButton = cancelButton;
+        return dialog.ShowDialog(owner) == DialogResult.Yes;
+    }
+
+    private void ShowDiagnosticsResultDialog(Form owner, string message, bool success,
+        bool dark, Color background, Color cardFill, Color foreground, Color border)
+    {
+        using Form dialog = CreateDiagnosticsDialogShell(L("BetaDiagnosticsDialogTitle"),
+            dark, background, foreground, new Size(ScaleUi(452), ScaleUi(214)));
+        RoundedPanel card = new()
+        {
+            Parent = dialog,
+            BackColor = cardFill,
+            OutsideBackColor = background,
+            BorderColor = border,
+            Bounds = new Rectangle(ScaleUi(18), ScaleUi(58),
+                dialog.ClientSize.Width - ScaleUi(36), ScaleUi(92))
+        };
+
+        _ = new Label
+        {
+            Parent = card,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            Text = success ? "✓" : "!",
+            Font = new Font("Segoe UI Symbol", 18f, FontStyle.Bold),
+            ForeColor = success
+                ? (dark ? Color.FromArgb(123, 224, 145) : Color.FromArgb(0, 130, 62))
+                : Color.FromArgb(234, 179, 8),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Bounds = new Rectangle(ScaleUi(16), ScaleUi(20), ScaleUi(28), ScaleUi(40))
+        };
+        _ = new Label
+        {
+            Parent = card,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI", 9f),
+            Text = message,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Bounds = new Rectangle(ScaleUi(56), ScaleUi(12),
+                card.Width - ScaleUi(72), ScaleUi(68))
+        };
+
+        ActionButton okButton = CreateDialogActionButton(L("Ok"), dark, true, background);
+        okButton.Parent = dialog;
+        okButton.Bounds = new Rectangle(dialog.ClientSize.Width - ScaleUi(152),
+            dialog.ClientSize.Height - ScaleUi(50), ScaleUi(128), ScaleUi(32));
+        okButton.DialogResult = DialogResult.OK;
+        dialog.AcceptButton = okButton;
+        dialog.CancelButton = okButton;
+        dialog.ShowDialog(owner);
+    }
+
+    private Form CreateDiagnosticsDialogShell(string title, bool dark, Color background,
+        Color foreground, Size clientSize)
+    {
+        Form dialog = new()
+        {
+            Text = title,
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.None,
+            ClientSize = clientSize,
+            AutoScaleMode = AutoScaleMode.None,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            ShowIcon = false,
+            BackColor = background,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI", 9f)
+        };
+        dialog.SizeChanged += (_, _) => ApplyRoundedDialogRegion(dialog);
+        ApplyRoundedDialogRegion(dialog);
+
+        _ = new PngIconControl(_iconCache, "diagnostics")
+        {
+            Parent = dialog,
+            DarkMode = dark,
+            Size = new Size(ScaleUi(28), ScaleUi(28)),
+            Location = new Point(ScaleUi(20), ScaleUi(16)),
+            BackColor = Color.Transparent,
+            Margin = new Padding(0)
+        };
+        _ = new Label
+        {
+            Parent = dialog,
+            Text = title,
+            AutoSize = false,
+            BackColor = Color.Transparent,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI Semibold", 10.5f),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Bounds = new Rectangle(ScaleUi(56), ScaleUi(14), dialog.ClientSize.Width - ScaleUi(76),
+                ScaleUi(30))
+        };
+        return dialog;
+    }
+
+    private void ApplyRoundedDialogRegion(Form dialog)
+    {
+        if (dialog.Width <= 0 || dialog.Height <= 0)
+            return;
+
+        dialog.Region?.Dispose();
+        using GraphicsPath rounded = GraphicsExtensions.CreateRoundedPath(
+            new RectangleF(0.5f, 0.5f, Math.Max(1, dialog.Width - 1f),
+                Math.Max(1, dialog.Height - 1f)), ScaleUi(10));
+        dialog.Region = new Region(rounded);
+    }
+
+    private ActionButton CreateDialogActionButton(string text, bool dark, bool primary,
+        Color outsideBackColor)
+    {
+        return new ActionButton(_iconCache)
+        {
+            Text = text,
+            DarkMode = dark,
+            Primary = primary,
+            OutsideBackColor = outsideBackColor,
+            Font = new Font("Segoe UI", 8.8f),
+            Margin = new Padding(0)
+        };
+    }
+
+    private sealed class DurationChoiceButton : Button
+    {
+        private bool _hovered;
+        private bool _pressed;
+        private bool _selectedChoice;
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool DarkMode { get; set; }
+
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool SelectedChoice
+        {
+            get => _selectedChoice;
+            set
+            {
+                if (_selectedChoice == value)
+                    return;
+                _selectedChoice = value;
+                Invalidate();
+            }
+        }
+
+        public DurationChoiceButton()
+        {
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            TabStop = true;
+            Cursor = Cursors.Hand;
+            UseVisualStyleBackColor = false;
+            ForeColor = Color.White;
+            Font = new Font("Segoe UI Semibold", 8.8f);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw | ControlStyles.UserPaint |
+                ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            Region?.Dispose();
+            using GraphicsPath path = GraphicsExtensions.CreateRoundedPath(
+                new RectangleF(0.5f, 0.5f, Math.Max(1, Width - 1f), Math.Max(1, Height - 1f)),
+                Math.Max(1, Math.Min(Height / 2, 18)));
+            Region = new Region(path);
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hovered = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hovered = false;
+            _pressed = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs mevent)
+        {
+            _pressed = true;
+            Invalidate();
+            base.OnMouseDown(mevent);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs mevent)
+        {
+            _pressed = false;
+            Invalidate();
+            base.OnMouseUp(mevent);
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnLostFocus(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            RectangleF rect = new(0.5f, 0.5f, Math.Max(1, Width - 1f), Math.Max(1, Height - 1f));
+            Color border = DarkMode ? Color.FromArgb(82, 92, 112) : Color.FromArgb(187, 197, 214);
+            Color fill = DarkMode ? Color.FromArgb(33, 38, 48) : Color.FromArgb(242, 246, 252);
+            Color hoverFill = DarkMode ? Color.FromArgb(44, 51, 63) : Color.FromArgb(234, 241, 250);
+            Color activeFill = DarkMode ? Color.FromArgb(35, 99, 132) : Color.FromArgb(221, 241, 252);
+            Color activeBorder = DarkMode ? Color.FromArgb(64, 160, 214) : Color.FromArgb(88, 163, 209);
+            Color text = DarkMode ? Color.WhiteSmoke : Color.FromArgb(35, 42, 52);
+            Color activeText = DarkMode ? Color.White : Color.FromArgb(19, 67, 100);
+            if (_selectedChoice)
+            {
+                fill = activeFill;
+                border = activeBorder;
+                text = activeText;
+            }
+            else if (_pressed)
+            {
+                fill = DarkMode ? Color.FromArgb(28, 33, 43) : Color.FromArgb(224, 232, 242);
+            }
+            else if (_hovered)
+            {
+                fill = hoverFill;
+            }
+
+            using GraphicsPath path = GraphicsExtensions.CreateRoundedPath(rect,
+                Math.Max(1, Math.Min(Height / 2, 18)));
+            using SolidBrush brush = new(fill);
+            using Pen pen = new(border, 1f);
+            e.Graphics.FillPath(brush, path);
+            e.Graphics.DrawPath(pen, path);
+
+            TextRenderer.DrawText(e.Graphics, Text, Font, Rectangle.Round(rect), text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+
+            // WinForms' default focus rectangle is square and dotted; render a smooth
+            // pill-shaped keyboard focus indicator only on choices not yet selected.
+            // Selected choices are already clearly indicated by their fill and border.
+            if (Focused && !_selectedChoice)
+            {
+                RectangleF focusBounds = RectangleF.Inflate(rect, -3f, -3f);
+                using GraphicsPath focusPath = GraphicsExtensions.CreateRoundedPath(
+                    focusBounds, Math.Max(1, Math.Min((Height - 6) / 2, 15)));
+                using Pen focusPen = new(activeBorder, 1.25f);
+                e.Graphics.DrawPath(focusPen, focusPath);
+            }
+        }
+    }
+
+    private sealed class WarningGlyphPanel : Panel
+    {
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            RectangleF triangle = new(Width * 0.14f, Height * 0.06f, Width * 0.72f, Height * 0.72f);
+            using GraphicsPath path = new();
+            path.AddPolygon(new[]
+            {
+                new PointF(triangle.Left + (triangle.Width / 2f), triangle.Top),
+                new PointF(triangle.Right, triangle.Bottom),
+                new PointF(triangle.Left, triangle.Bottom)
+            });
+            using SolidBrush fill = new(ForeColor);
+            e.Graphics.FillPath(fill, path);
+            using SolidBrush mark = new(Color.FromArgb(38, 38, 38));
+            float centerX = Width / 2f;
+            float top = Height * 0.30f;
+            e.Graphics.FillRectangle(mark, centerX - (Width * 0.04f), top,
+                Width * 0.08f, Height * 0.28f);
+            e.Graphics.FillEllipse(mark, centerX - (Width * 0.05f), Height * 0.70f,
+                Width * 0.10f, Height * 0.10f);
+        }
+    }
+
 }
