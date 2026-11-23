@@ -121,9 +121,11 @@ internal static class UpdateInstallerLauncher
             if ($stagedHash -ine $expectedHash) {
                 throw 'The temporary installer copy failed its SHA-256 check.'
             }
-            # The user must still approve normal installer elevation (UAC).
+            # Per-user installations do not require elevation. Inno Setup itself
+            # handles UAC when upgrading an existing all-users installation
+            # or when the user explicitly selects the all-users mode.
             # Clean Installation remains opt-in, not silently enabled.
-            $setup = Start-Process -FilePath $stagedInstaller -Verb RunAs -ArgumentList '/MERGETASKS=!cleaninstall' -Wait -PassThru -ErrorAction Stop
+            $setup = Start-Process -FilePath $stagedInstaller -ArgumentList '/MERGETASKS=!cleaninstall' -Wait -PassThru -ErrorAction Stop
             if ($setup.ExitCode -ne 0) {
                 throw ('Inno Setup returned exit code ' + $setup.ExitCode)
             }
@@ -229,7 +231,8 @@ internal static class UpdateInstallerLauncher
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(installer.Path)!,
+            // Don't pin the Updates folder while Setup tries to remove it.
+            WorkingDirectory = Path.GetDirectoryName(powershell)!,
         };
         start.ArgumentList.Add("-NoLogo");
         start.ArgumentList.Add("-NoProfile");

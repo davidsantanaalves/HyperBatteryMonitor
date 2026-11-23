@@ -38,6 +38,7 @@ VersionInfoProductTextVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 UsePreviousAppDir=no
+DirExistsWarning=no
 DefaultGroupName={#MyAppName}
 UsePreviousGroup=no
 OutputDir=..\Releases
@@ -47,7 +48,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+UsePreviousPrivileges=yes
 CloseApplications=yes
 CloseApplicationsFilter=*.exe,*.dll
 RestartApplications=no
@@ -78,6 +81,7 @@ Name: "{#CleanInstallTaskName}"; Description: "{#CleanInstallTaskDescription}"; 
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "https://buymeacoffee.com/davesantana"; Description: "Support the developer (Buy Me a Coffee)"; Flags: postinstall shellexec skipifsilent unchecked
 
 [Code]
 const
