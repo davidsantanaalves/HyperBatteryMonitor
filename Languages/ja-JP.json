@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "自動電源オフ",
   "SidebarMonitoringMode": "モード",
   "AutoPowerOffNotSupportedForDevice": "このデバイスでは利用できません。",
-  "AutoPowerOffPowerOnToChange": "この設定を変更するには、ヘッドセットの電源を入れてください。"
+  "AutoPowerOffPowerOnToChange": "この設定を変更するには、ヘッドセットの電源を入れてください。",
+  "ExitConfirmationTitle": "Hyper Battery Monitor を終了しますか？",
+  "ExitConfirmationMessage": "Hyper Battery Monitor を終了します。保存または適用されていない変更はすべて失われます。終了しますか？"
 }

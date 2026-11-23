@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Auto wyłącz.",
   "SidebarMonitoringMode": "Tryb",
   "AutoPowerOffNotSupportedForDevice": "Niedostępne dla tego urządzenia.",
-  "AutoPowerOffPowerOnToChange": "Aby zmienić tę opcję, zestaw słuchawkowy musi być włączony."
+  "AutoPowerOffPowerOnToChange": "Aby zmienić tę opcję, zestaw słuchawkowy musi być włączony.",
+  "ExitConfirmationTitle": "Zamknąć Hyper Battery Monitor?",
+  "ExitConfirmationMessage": "Aplikacja Hyper Battery Monitor zostanie zamknięta. Wszystkie niezapisane lub niezastosowane zmiany zostaną utracone. Czy chcesz zakończyć?"
 }

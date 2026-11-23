@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Auto-Abschalt.",
   "SidebarMonitoringMode": "Modus",
   "AutoPowerOffNotSupportedForDevice": "Für Ihr Gerät nicht verfügbar.",
-  "AutoPowerOffPowerOnToChange": "Das Headset muss eingeschaltet sein, um diese Option zu ändern."
+  "AutoPowerOffPowerOnToChange": "Das Headset muss eingeschaltet sein, um diese Option zu ändern.",
+  "ExitConfirmationTitle": "Hyper Battery Monitor beenden?",
+  "ExitConfirmationMessage": "Hyper Battery Monitor wird beendet. Alle nicht gespeicherten oder angewendeten Änderungen gehen verloren. Möchten Sie das Programm beenden?"
 }

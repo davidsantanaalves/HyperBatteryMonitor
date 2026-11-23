@@ -119,6 +119,12 @@ internal sealed class PngIconCache : IDisposable
 
     private static string GetIconPath(string iconKey, bool darkMode, int sizePx)
     {
+        // "common:" explicitly selects a shared asset, even when a themed file
+        // with the same name exists (the tray Exit action uses the red shared art).
+        if (iconKey.StartsWith("common:", StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(AssetPaths.CommonIconsDirectory,
+                $"{iconKey["common:".Length..]}-{sizePx}x{sizePx}.png");
+
         string suffix = darkMode ? "dark" : "light";
         string directory = AssetPaths.GetThemeIconsDirectory(darkMode);
 
@@ -179,6 +185,15 @@ internal sealed class PngIconCache : IDisposable
         string sharedDirectory = AssetPaths.CommonIconsDirectory;
 
         List<int> sizes = new();
+        if (iconKey.StartsWith("common:", StringComparison.OrdinalIgnoreCase))
+        {
+            CollectAssetSizes(sizes, sharedDirectory,
+                new[] { $"{iconKey["common:".Length..]}-" });
+            int[] commonSizes = sizes.Distinct().OrderBy(size => size).ToArray();
+            _assetSizes.Add(cacheKey, commonSizes);
+            return commonSizes;
+        }
+
         CollectAssetSizes(
             sizes,
             themeDirectory,

@@ -92,23 +92,54 @@ var
   PreviousInstallDetected: Boolean;
 
 function TryReadPreviousInstallDir(var InstallDir: String): Boolean;
+var
+  MachineInstallDir: String;
+  UserInstallDir: String;
+  MachineFound: Boolean;
+  UserFound: Boolean;
 begin
   InstallDir := '';
-  Result := False;
+  MachineInstallDir := '';
+  UserInstallDir := '';
+  MachineFound := False;
 
   if IsWin64 then
-    Result := RegQueryStringValue(
+    MachineFound := RegQueryStringValue(
       HKLM64,
       PreviousUninstallSubkey,
       'InstallLocation',
-      InstallDir);
+      MachineInstallDir);
 
-  if not Result then
-    Result := RegQueryStringValue(
+  if not MachineFound then
+    MachineFound := RegQueryStringValue(
       HKLM32,
       PreviousUninstallSubkey,
       'InstallLocation',
-      InstallDir);
+      MachineInstallDir);
+
+  UserFound := RegQueryStringValue(
+    HKCU,
+    PreviousUninstallSubkey,
+    'InstallLocation',
+    UserInstallDir);
+
+  { Different registered install locations must not trigger cross-scope cleanup. }
+  if MachineFound and UserFound and
+     (CompareText(
+       RemoveBackslashUnlessRoot(MachineInstallDir),
+       RemoveBackslashUnlessRoot(UserInstallDir)) <> 0) then
+  begin
+    Log('Both per-user and all-users installs were found in different folders. ' +
+      'Skipping custom previous-folder cleanup.');
+    Result := False;
+    Exit;
+  end;
+
+  Result := MachineFound or UserFound;
+  if MachineFound then
+    InstallDir := MachineInstallDir
+  else if UserFound then
+    InstallDir := UserInstallDir;
 
   if Result then
     InstallDir := RemoveBackslashUnlessRoot(InstallDir);

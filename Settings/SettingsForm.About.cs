@@ -18,6 +18,9 @@ public sealed partial class SettingsForm : Form
     private const int AboutLegalCardLogicalHeight = 88;
     private const int AboutSectionBottomMarginLogicalHeight = 6;
 
+    [DllImport("user32.dll", EntryPoint = "GetDpiForWindow")]
+    private static extern uint GetDiagnosticsWindowDpi(IntPtr hwnd);
+
     private void ShowAboutPage()
     {
         TableLayoutPanel page = BeginResponsivePage();
@@ -166,6 +169,8 @@ public sealed partial class SettingsForm : Form
     private void ShowDiagnosticsDialog()
     {
         bool dark = EffectiveTheme == AppTheme.Dark;
+        // The modal can remain open while Windows changes display scaling.
+        // Keep the effective DPI mutable; every layout measurement uses S().
         int dpi = Math.Max(LogicalDpi, DeviceDpi);
         int S(int x) => PngIconCache.ScaleLogicalToInt(x, dpi);
         Color background = dark ? DarkBackground : Color.White;
@@ -182,6 +187,8 @@ public sealed partial class SettingsForm : Form
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.None,
             ClientSize = new Size(S(680), S(715)),
+            // Layout is manually scaled for the current DPI and explicitly
+            // recalculated on WM_DPICHANGED. Avoid WinForms scaling twice.
             AutoScaleMode = AutoScaleMode.None,
             ShowInTaskbar = false,
             ShowIcon = false,
@@ -209,7 +216,9 @@ public sealed partial class SettingsForm : Form
         Panel viewport = new()
         {
             Dock = DockStyle.Fill,
-            AutoScroll = true,
+            // Enable scrolling only when the measured content exceeds this viewport.
+            // Leaving AutoScroll on after a DPI downscale can retain obsolete ranges.
+            AutoScroll = false,
             BackColor = background,
             Margin = new Padding(0),
             Padding = new Padding(0)
@@ -223,6 +232,10 @@ public sealed partial class SettingsForm : Form
             Margin = new Padding(0)
         };
         viewport.Controls.Add(canvas);
+        // Match the themed scrollbar already used by Settings pages. It overlays
+        // the native scroll track but leaves wheel, touchpad and keyboard scrolling
+        // with the WinForms viewport. Disposal is tied to this modal's lifetime.
+        using ThemedVerticalScrollBar themedScrollBar = new(viewport, dark);
 
         RoundedPanel Card()
         {
@@ -396,98 +409,288 @@ public sealed partial class SettingsForm : Form
         };
         canvas.Controls.Add(terms);
 
-        // Position only direct children of the cards. The previous nested
-        // TableLayoutPanels computed preferred heights beyond their fixed rows,
-        // which clipped descriptions and put glyphs outside the cards.
+        // Diagnostics must follow the same responsive-DPI contract as the Device Settings
+        // dialog: measure actual localized text and action captions, then reflow the
+        // cards instead of placing labels inside fixed-height rectangles.
+        // An undersized screen can scroll; no content or action may be clipped.
+        bool diagnosticsLayoutInProgress = false;
         void LayoutDiagnostics()
         {
-            // Reserve the vertical scrollbar width if a smaller display needs it.
-            int scrollbar = canvas.Height > viewport.ClientSize.Height
-                ? SystemInformation.VerticalScrollBarWidth : 0;
-            int canvasWidth = Math.Max(S(400), viewport.ClientSize.Width - scrollbar);
-            if (canvas.Width != canvasWidth) canvas.Width = canvasWidth;
-            int left = S(18);
-            int cardWidth = Math.Max(S(1), canvas.Width - S(36));
-            int textLeft = S(66);
-            int textWidth = Math.Max(1, cardWidth - textLeft - S(16));
+            if (diagnosticsLayoutInProgress || viewport.IsDisposed || canvas.IsDisposed)
+                return;
 
-            headerIcon.Bounds = new Rectangle(left + S(3), S(18), S(36), S(36));
-            headerTitle.Bounds = new Rectangle(left + S(52), S(12),
-                Math.Max(1, cardWidth - S(52)), S(47));
-
-            const int introTop = 68;
-            const int introHeight = 124;
-            const int detailedHeight = 139;
-            bool narrow = cardWidth < S(565);
-            int storageHeight = narrow ? 127 : 88;
-            int detailedTop = introTop + introHeight + 8;
-            int storageTop = detailedTop + detailedHeight + 8;
-            int privacyTop = storageTop + storageHeight + 8;
-            int retentionTop = privacyTop + 85 + 8;
-            int termsTop = retentionTop + 69 + 4;
-            int dividerTop = termsTop + 24 + 5;
-            int footerTop = dividerTop + 14;
-            int requiredHeight = footerTop + 34 + 16;
-
-            intro.Bounds = new Rectangle(left, S(introTop), cardWidth, S(introHeight));
-            introIcon.Bounds = new Rectangle(S(19), S(21), S(25), S(25));
-            introTitle.Bounds = new Rectangle(textLeft, S(9), textWidth, S(28));
-            introDescription.Bounds = new Rectangle(textLeft, S(36), textWidth, S(38));
-            statusText.Bounds = new Rectangle(textLeft, S(83),
-                Math.Max(1, cardWidth - textLeft - S(76)), S(29));
-            toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)), S(87),
-                S(44), S(25));
-
-            detailed.Bounds = new Rectangle(left, S(detailedTop), cardWidth, S(detailedHeight));
-            detailedIcon.Bounds = new Rectangle(S(15), S(14), S(27), S(27));
-            detailedTitle.Bounds = new Rectangle(S(54), S(8),
-                Math.Max(1, cardWidth - S(74)), S(30));
-            detailedDescription.Bounds = new Rectangle(S(17), S(42),
-                Math.Max(1, cardWidth - S(34)), S(36));
-            detailedState.Bounds = new Rectangle(S(17), S(84),
-                Math.Max(1, cardWidth - S(245)), S(40));
-            startDetailed.Bounds = new Rectangle(Math.Max(S(8), cardWidth - S(214)),
-                S(91), S(195), S(34));
-            stopDetailed.Bounds = startDetailed.Bounds;
-
-            storage.Bounds = new Rectangle(left, S(storageTop), cardWidth, S(storageHeight));
-            storageIcon.Bounds = new Rectangle(S(15), S(16), S(36), S(36));
-            storageTitle.Bounds = new Rectangle(S(63), S(7),
-                narrow ? Math.Max(1, cardWidth - S(84)) : Math.Max(1, cardWidth - S(385)), S(28));
-            storageUsage.Bounds = new Rectangle(S(63), S(35),
-                narrow ? Math.Max(1, cardWidth - S(84)) : Math.Max(1, cardWidth - S(385)), S(30));
-            if (narrow)
+            diagnosticsLayoutInProgress = true;
+            try
             {
-                int gap = S(10);
-                int buttonWidth = Math.Max(S(100), (cardWidth - S(36) - gap) / 2);
-                openLogs.Bounds = new Rectangle(S(13), S(81), buttonWidth, S(34));
-                clearLogs.Bounds = new Rectangle(S(13) + buttonWidth + gap,
-                    S(81), buttonWidth, S(34));
+                // The viewport.Width is the *full* usable width even if a native
+                // scrollbar from the previous DPI is still present. Leave room for
+                // a possible vertical scrollbar and one rounding pixel, but never
+                // make the canvas wider than its viewport (which would create a
+                // horizontal scrollbar and can keep the vertical one stuck on).
+                int canvasWidth = Math.Max(1,
+                    viewport.Width - SystemInformation.VerticalScrollBarWidth - 1);
+                if (canvas.Width != canvasWidth)
+                    canvas.Width = canvasWidth;
+
+                int left = S(18);
+                int cardWidth = Math.Max(1, canvasWidth - S(36));
+                int textLeft = S(66);
+                int textWidth = Math.Max(1, cardWidth - textLeft - S(16));
+                int cardGap = S(8);
+                int insideLeft = S(17);
+                int insideRight = S(18);
+                TextFormatFlags wrap = TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak;
+                TextFormatFlags single = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+
+                int Measure(Label label, int width, int minimumHeight)
+                {
+                    if (string.IsNullOrEmpty(label.Text))
+                        return minimumHeight;
+                    int measured = TextRenderer.MeasureText(label.Text, label.Font,
+                        new Size(Math.Max(1, width), int.MaxValue), wrap).Height;
+                    return Math.Max(minimumHeight, measured + S(4));
+                }
+
+                int ActionWidth(ActionButton button, int minimumWidth)
+                {
+                    int measured = TextRenderer.MeasureText(button.Text, button.Font,
+                        new Size(int.MaxValue, int.MaxValue), single).Width;
+                    // ActionButton paints inside a rounded rectangle; keep room
+                    // for both ends, theme borders and Windows text overhang.
+                    return Math.Max(minimumWidth, measured + S(32));
+                }
+
+                int ActionHeight(ActionButton button) => Math.Max(S(34),
+                    TextRenderer.MeasureText(button.Text, button.Font,
+                        new Size(int.MaxValue, int.MaxValue), single).Height + S(13));
+
+                // Header can also wrap for longer localized titles.
+                int headerTextWidth = Math.Max(1, cardWidth - S(52));
+                int headerHeight = Measure(headerTitle, headerTextWidth, S(47));
+                headerIcon.Bounds = new Rectangle(left + S(3), S(18), S(36), S(36));
+                headerTitle.Bounds = new Rectangle(left + S(52), S(12),
+                    headerTextWidth, headerHeight);
+                int top = Math.Max(S(68), S(12) + headerHeight + S(8));
+
+                // Essential logging card.
+                int introTitleTop = S(9);
+                int introTitleHeight = Measure(introTitle, textWidth, S(28));
+                int introDescriptionTop = introTitleTop + introTitleHeight + S(1);
+                int introDescriptionHeight = Measure(introDescription, textWidth, S(38));
+                int statusTop = introDescriptionTop + introDescriptionHeight + S(7);
+                int statusWidth = Math.Max(1, cardWidth - textLeft - S(76));
+                int statusHeight = Measure(statusText, statusWidth, S(29));
+                int introHeight = Math.Max(S(124), statusTop +
+                    Math.Max(statusHeight, S(25)) + S(12));
+
+                intro.Bounds = new Rectangle(left, top, cardWidth, introHeight);
+                introIcon.Bounds = new Rectangle(S(19), S(21), S(25), S(25));
+                introTitle.Bounds = new Rectangle(textLeft, introTitleTop,
+                    textWidth, introTitleHeight);
+                introDescription.Bounds = new Rectangle(textLeft, introDescriptionTop,
+                    textWidth, introDescriptionHeight);
+                statusText.Bounds = new Rectangle(textLeft, statusTop,
+                    statusWidth, statusHeight);
+                toggle.Bounds = new Rectangle(Math.Max(S(4), cardWidth - S(62)),
+                    statusTop + Math.Max(0, (statusHeight - S(25)) / 2), S(44), S(25));
+                top += introHeight + cardGap;
+
+                // Detailed capture card. Give the Start and Stop actions the
+                // *same measured bounds*, so toggling them never shifts the UI.
+                int detailedTitleWidth = Math.Max(1, cardWidth - S(74));
+                int detailedTitleHeight = Measure(detailedTitle, detailedTitleWidth, S(30));
+                int detailedDescriptionTop = S(8) + detailedTitleHeight + S(3);
+                int detailedDescriptionWidth = Math.Max(1, cardWidth - S(34));
+                int detailedDescriptionHeight = Measure(detailedDescription,
+                    detailedDescriptionWidth, S(36));
+                int detailedBodyTop = detailedDescriptionTop + detailedDescriptionHeight + S(7);
+                int detailedActionWidth = Math.Max(
+                    ActionWidth(startDetailed, S(150)), ActionWidth(stopDetailed, S(150)));
+                int detailedActionHeight = Math.Max(
+                    ActionHeight(startDetailed), ActionHeight(stopDetailed));
+                int bodyAvailable = Math.Max(1, cardWidth - insideLeft - insideRight);
+                bool detailedInline = bodyAvailable >= detailedActionWidth + S(12) + S(145);
+                int detailedStateWidth = detailedInline
+                    ? bodyAvailable - detailedActionWidth - S(12)
+                    : bodyAvailable;
+                int detailedStateHeight = Measure(detailedState, detailedStateWidth, S(34));
+                int detailedButtonTop = detailedInline
+                    ? detailedBodyTop + Math.Max(0, (detailedStateHeight - detailedActionHeight) / 2)
+                    : detailedBodyTop + detailedStateHeight + S(7);
+                int detailedButtonX = detailedInline
+                    ? cardWidth - insideRight - detailedActionWidth
+                    : insideLeft;
+                int displayedActionWidth = detailedInline
+                    ? detailedActionWidth
+                    : Math.Max(1, bodyAvailable);
+                int detailedHeight = Math.Max(S(139),
+                    (detailedInline
+                        ? detailedBodyTop + Math.Max(detailedStateHeight, detailedActionHeight)
+                        : detailedButtonTop + detailedActionHeight) + S(12));
+
+                detailed.Bounds = new Rectangle(left, top, cardWidth, detailedHeight);
+                detailedIcon.Bounds = new Rectangle(S(15), S(14), S(27), S(27));
+                detailedTitle.Bounds = new Rectangle(S(54), S(8),
+                    detailedTitleWidth, detailedTitleHeight);
+                detailedDescription.Bounds = new Rectangle(insideLeft,
+                    detailedDescriptionTop, detailedDescriptionWidth, detailedDescriptionHeight);
+                detailedState.Bounds = new Rectangle(insideLeft, detailedBodyTop,
+                    detailedStateWidth, detailedStateHeight);
+                Rectangle detailedActionBounds = new(detailedButtonX, detailedButtonTop,
+                    displayedActionWidth, detailedActionHeight);
+                startDetailed.Bounds = detailedActionBounds;
+                stopDetailed.Bounds = detailedActionBounds;
+                top += detailedHeight + cardGap;
+
+                // Log storage card. Show actions beside the summary only when both
+                // captions and the summary have sufficient measured space.
+                int storageOpenWidth = ActionWidth(openLogs, S(125));
+                int storageClearWidth = ActionWidth(clearLogs, S(110));
+                int storageActionHeight = Math.Max(ActionHeight(openLogs), ActionHeight(clearLogs));
+                int storageButtonGap = S(8);
+                int storageActionsWidth = storageOpenWidth + storageButtonGap + storageClearWidth;
+                int storageSummaryWidth = Math.Max(1,
+                    cardWidth - S(63) - insideRight - storageActionsWidth - S(14));
+                bool storageInline = storageSummaryWidth >= S(160);
+                int storageSummaryRight = storageInline ? storageSummaryWidth :
+                    Math.Max(1, cardWidth - S(63) - insideRight);
+                int storageTitleTop = S(7);
+                int storageTitleHeight = Measure(storageTitle, storageSummaryRight, S(28));
+                int storageUsageTop = storageTitleTop + storageTitleHeight;
+                int storageUsageHeight = Measure(storageUsage, storageSummaryRight, S(30));
+                int storageSummaryBottom = storageUsageTop + storageUsageHeight;
+                int storageButtonsTop;
+                int storageOpenX;
+                int storageClearX;
+                int storageOpenDisplayedWidth;
+                int storageClearDisplayedWidth;
+                int storageHeight;
+                int storageClearTop;
+
+                if (storageInline)
+                {
+                    storageButtonsTop = Math.Max(S(14),
+                        (storageSummaryBottom - storageActionHeight) / 2);
+                    storageOpenX = cardWidth - insideRight - storageActionsWidth;
+                    storageClearX = storageOpenX + storageOpenWidth + storageButtonGap;
+                    storageOpenDisplayedWidth = storageOpenWidth;
+                    storageClearDisplayedWidth = storageClearWidth;
+                    storageClearTop = storageButtonsTop;
+                    storageHeight = Math.Max(S(88), Math.Max(storageSummaryBottom,
+                        storageButtonsTop + storageActionHeight) + S(10));
+                }
+                else
+                {
+                    storageButtonsTop = storageSummaryBottom + S(8);
+                    int rowWidth = cardWidth - S(26);
+                    bool buttonsInOneRow = storageActionsWidth <= rowWidth;
+                    if (buttonsInOneRow)
+                    {
+                        storageOpenX = S(13);
+                        storageClearX = storageOpenX + storageOpenWidth + storageButtonGap;
+                        storageOpenDisplayedWidth = storageOpenWidth;
+                        storageClearDisplayedWidth = storageClearWidth;
+                        storageClearTop = storageButtonsTop;
+                    }
+                    else
+                    {
+                        // In a narrow dialog, stack actions instead of shrinking
+                        // their text rectangles below the caption's actual width.
+                        storageOpenX = S(13);
+                        storageClearX = S(13);
+                        storageOpenDisplayedWidth = Math.Max(1, rowWidth);
+                        storageClearDisplayedWidth = Math.Max(1, rowWidth);
+                        storageClearTop = storageButtonsTop + storageActionHeight + S(8);
+                    }
+                    storageHeight = Math.Max(S(88), storageClearTop +
+                        storageActionHeight + S(12));
+                }
+
+                storage.Bounds = new Rectangle(left, top, cardWidth, storageHeight);
+                storageIcon.Bounds = new Rectangle(S(15), S(16), S(36), S(36));
+                storageTitle.Bounds = new Rectangle(S(63), storageTitleTop,
+                    storageSummaryRight, storageTitleHeight);
+                storageUsage.Bounds = new Rectangle(S(63), storageUsageTop,
+                    storageSummaryRight, storageUsageHeight);
+                openLogs.Bounds = new Rectangle(storageOpenX, storageButtonsTop,
+                    storageOpenDisplayedWidth, storageActionHeight);
+                clearLogs.Bounds = new Rectangle(storageClearX, storageClearTop,
+                    storageClearDisplayedWidth, storageActionHeight);
+                top += storageHeight + cardGap;
+
+                // Privacy/retention may span several localized lines. Neither is
+                // constrained to a fixed 85/69 logical-pixel card height anymore.
+                int privacyTextHeight = Measure(privacyText, textWidth, S(67));
+                int privacyHeight = Math.Max(S(85), privacyTextHeight + S(18));
+                privacy.Bounds = new Rectangle(left, top, cardWidth, privacyHeight);
+                privacyGlyph.Bounds = new Rectangle(S(16), S(24), S(36), S(36));
+                privacyText.Bounds = new Rectangle(textLeft, S(9),
+                    textWidth, privacyTextHeight);
+                top += privacyHeight + cardGap;
+
+                int retentionTextHeight = Measure(retentionText, textWidth, S(56));
+                int retentionHeight = Math.Max(S(69), retentionTextHeight + S(14));
+                retention.Bounds = new Rectangle(left, top, cardWidth, retentionHeight);
+                retentionGlyph.Bounds = new Rectangle(S(16), S(16), S(36), S(36));
+                retentionText.Bounds = new Rectangle(textLeft, S(7),
+                    textWidth, retentionTextHeight);
+                top += retentionHeight + S(4);
+
+                int termsHeight = Math.Max(S(24),
+                    TextRenderer.MeasureText(terms.Text, terms.Font,
+                        new Size(Math.Max(1, cardWidth - S(10)), int.MaxValue), wrap).Height + S(4));
+                terms.Bounds = new Rectangle(left + S(5), top,
+                    Math.Max(1, cardWidth - S(10)), termsHeight);
+                top += termsHeight + S(5);
+
+                footerDivider.Bounds = new Rectangle(left, top, cardWidth, S(1));
+                top += S(14);
+                int closeWidth = ActionWidth(close, S(166));
+                int closeHeight = ActionHeight(close);
+                close.Bounds = new Rectangle(left + Math.Max(0, cardWidth - closeWidth),
+                    top, Math.Min(cardWidth, closeWidth), closeHeight);
+                top += closeHeight + S(16);
+
+                if (canvas.Height != top)
+                    canvas.Height = top;
+
+                // A larger-DPI layout may have created native scroll ranges and a
+                // negative canvas offset. Re-evaluate from the freshly measured
+                // content height, not from the old scrollbar state. The viewport's
+                // Height (rather than ClientSize.Height) excludes stale horizontal
+                // scrollbar bookkeeping from this decision.
+                bool needsVerticalScroll = top > viewport.Height;
+                if (needsVerticalScroll)
+                {
+                    if (!viewport.AutoScroll)
+                        viewport.AutoScroll = true;
+                    Size scrollExtent = new(0, top);
+                    if (viewport.AutoScrollMinSize != scrollExtent)
+                        viewport.AutoScrollMinSize = scrollExtent;
+                }
+                else
+                {
+                    // Remove BOTH stale vertical and horizontal scrollbars when
+                    // the content fits again, including after 175% -> 100% DPI.
+                    // Clear the old range/position and put the canvas at the origin.
+                    if (viewport.AutoScroll)
+                        viewport.AutoScroll = false;
+                    if (viewport.AutoScrollMinSize != Size.Empty)
+                        viewport.AutoScrollMinSize = Size.Empty;
+                    if (viewport.AutoScrollPosition != Point.Empty)
+                        viewport.AutoScrollPosition = Point.Empty;
+                    if (canvas.Location != Point.Empty)
+                        canvas.Location = Point.Empty;
+                }
             }
-            else
+            finally
             {
-                int buttonWidth = S(139);
-                int gap = S(8);
-                int firstX = cardWidth - S(17) - 2 * buttonWidth - gap;
-                openLogs.Bounds = new Rectangle(firstX, S(32), buttonWidth, S(34));
-                clearLogs.Bounds = new Rectangle(firstX + buttonWidth + gap,
-                    S(32), buttonWidth, S(34));
+                diagnosticsLayoutInProgress = false;
             }
-
-            privacy.Bounds = new Rectangle(left, S(privacyTop), cardWidth, S(85));
-            privacyGlyph.Bounds = new Rectangle(S(16), S(24), S(36), S(36));
-            privacyText.Bounds = new Rectangle(textLeft, S(9), textWidth, S(67));
-
-            retention.Bounds = new Rectangle(left, S(retentionTop), cardWidth, S(69));
-            retentionGlyph.Bounds = new Rectangle(S(16), S(16), S(36), S(36));
-            retentionText.Bounds = new Rectangle(textLeft, S(7), textWidth, S(56));
-
-            terms.Bounds = new Rectangle(left + S(5), S(termsTop),
-                Math.Max(1, cardWidth - S(10)), S(24));
-            footerDivider.Bounds = new Rectangle(left, S(dividerTop), cardWidth, S(1));
-            close.Bounds = new Rectangle(left + cardWidth - S(166), S(footerTop), S(166), S(34));
-            int canvasHeight = S(requiredHeight);
-            if (canvas.Height != canvasHeight) canvas.Height = canvasHeight;
+            // Track content-height changes (e.g. a translated string or a
+            // status change) so the themed overlay never becomes stale.
+            if (viewport.IsHandleCreated)
+                themedScrollBar.RefreshState();
         }
         viewport.SizeChanged += (_, _) => LayoutDiagnostics();
         LayoutDiagnostics();
@@ -548,6 +751,7 @@ public sealed partial class SettingsForm : Form
 
             storageUsage.Text = string.Format(culture, L("BetaDiagnosticsStorageUsage"),
                 files, size, L(unitKey));
+            LayoutDiagnostics();
             clearLogs.Enabled = !maintenanceBusy;
             return files;
         }
@@ -575,10 +779,15 @@ public sealed partial class SettingsForm : Form
             stopDetailed.Visible = detailedActive;
             stopDetailed.Enabled = detailedActive && !maintenanceBusy;
             toggle.Enabled = !maintenanceBusy;
-            detailedState.Text = detailedActive
+            string newDetailedState = detailedActive
                 ? string.Format(L("BetaDiagnosticsDetailedRemaining"),
                     Math.Max(1, (int)Math.Ceiling((ends!.Value - DateTimeOffset.UtcNow).TotalMinutes)))
                 : L("BetaDiagnosticsDetailedInactive");
+            if (detailedState.Text != newDetailedState)
+            {
+                detailedState.Text = newDetailedState;
+                LayoutDiagnostics();
+            }
         }
         startDetailed.Click += (_, _) =>
         {
@@ -699,20 +908,98 @@ public sealed partial class SettingsForm : Form
         };
         ShowState();
         UpdateStorage();
-        modal.Shown += (_, _) =>
+        // Recompute the preferred logical size on *every* DPI transition,
+        // including 175% -> 100%. A one-way Min(oldSize, workingArea) clamp
+        // would keep the window oversized after Windows scaling is reduced.
+        void FitModalToDpi(int nextDpi, Rectangle? targetRectangle = null)
         {
-            Rectangle bounds = Screen.FromControl(modal).WorkingArea;
-            modal.Width = Math.Min(modal.Width, Math.Max(S(400), bounds.Width - S(24)));
-            modal.Height = Math.Min(modal.Height, Math.Max(S(320), bounds.Height - S(24)));
-            modal.Location = new Point(
-                bounds.Left + (bounds.Width - modal.Width) / 2,
-                bounds.Top + (bounds.Height - modal.Height) / 2);
+            if (modal.IsDisposed || modal.Disposing)
+                return;
+
+            dpi = Math.Clamp(nextDpi, LogicalDpi, 768);
+            Rectangle workArea = targetRectangle is { Width: > 0, Height: > 0 } suggested
+                ? Screen.FromRectangle(suggested).WorkingArea
+                : Screen.FromControl(modal).WorkingArea;
+            int width = Math.Min(S(680), Math.Max(1, workArea.Width - S(24)));
+            int height = Math.Min(S(715), Math.Max(1, workArea.Height - S(24)));
+            modal.Bounds = new Rectangle(
+                workArea.Left + (workArea.Width - width) / 2,
+                workArea.Top + (workArea.Height - height) / 2,
+                width, height);
+            RoundWindow(); // The corner radius scales even if Bounds remain unchanged.
+            // A DPI transition must invalidate the previous scroll ranges BEFORE
+            // content measurement; otherwise WinForms may retain a phantom bar.
+            viewport.AutoScroll = false;
+            viewport.AutoScrollMinSize = Size.Empty;
+            viewport.AutoScrollPosition = Point.Empty;
+            canvas.Location = Point.Empty;
             LayoutDiagnostics();
-        };
+            if (viewport.IsHandleCreated)
+                ApplyNativeScrollTheme(viewport, dark); // Fallback if overlay is hidden.
+            themedScrollBar.RefreshState();
+        }
+
+        int CurrentWindowDpi()
+        {
+            if (modal.IsHandleCreated)
+            {
+                try
+                {
+                    uint current = GetDiagnosticsWindowDpi(modal.Handle);
+                    if (current is >= 96 and <= 768)
+                        return (int)current;
+                }
+                catch (EntryPointNotFoundException) { /* Fallback to WinForms DPI. */ }
+            }
+            return Math.Max(LogicalDpi, modal.DeviceDpi);
+        }
+
+        // DPI and shell preference notifications may originate on other threads.
+        // Queue resize until WinForms has processed WM_DPICHANGED, to avoid the
+        // framework's suggested window rectangle overriding our logical size.
+        void QueueDpiRefresh(int? eventDpi = null, Rectangle? suggestedRectangle = null,
+            bool forceFit = false)
+        {
+            if (modal.IsDisposed || modal.Disposing || !modal.IsHandleCreated)
+                return;
+            try
+            {
+                modal.BeginInvoke((MethodInvoker)(() =>
+                {
+                    if (modal.IsDisposed || modal.Disposing)
+                        return;
+                    int current = eventDpi ?? CurrentWindowDpi();
+                    if (forceFit || current != dpi || suggestedRectangle.HasValue)
+                        FitModalToDpi(current, suggestedRectangle);
+                    else
+                    {
+                        LayoutDiagnostics();
+                        themedScrollBar.RefreshState();
+                    }
+                }));
+            }
+            catch (InvalidOperationException) { /* Modal is closing. */ }
+        }
+
+        modal.DpiChanged += (_, e) =>
+            QueueDpiRefresh(e.DeviceDpiNew, e.SuggestedRectangle);
+        void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
+            QueueDpiRefresh(forceFit: true);
+        void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e) =>
+            QueueDpiRefresh();
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        modal.Shown += (_, _) => FitModalToDpi(CurrentWindowDpi());
+
         overlay.Show(this);
         overlay.BringToFront();
         try { modal.ShowDialog(overlay); }
-        finally { overlay.Close(); }
+        finally
+        {
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            overlay.Close();
+        }
     }
 
     private static void OpenExternalUrl(string url)

@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Автовыкл.",
   "SidebarMonitoringMode": "Режим",
   "AutoPowerOffNotSupportedForDevice": "Недоступно для вашего устройства.",
-  "AutoPowerOffPowerOnToChange": "Для изменения этого параметра гарнитура должна быть включена."
+  "AutoPowerOffPowerOnToChange": "Для изменения этого параметра гарнитура должна быть включена.",
+  "ExitConfirmationTitle": "Выйти из Hyper Battery Monitor?",
+  "ExitConfirmationMessage": "Hyper Battery Monitor будет закрыт. Все несохранённые или неприменённые изменения будут потеряны. Выйти из приложения?"
 }

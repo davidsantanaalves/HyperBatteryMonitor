@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "自动关机",
   "SidebarMonitoringMode": "模式",
   "AutoPowerOffNotSupportedForDevice": "您的设备不支持此功能。",
-  "AutoPowerOffPowerOnToChange": "要更改此选项，耳机必须处于开机状态。"
+  "AutoPowerOffPowerOnToChange": "要更改此选项，耳机必须处于开机状态。",
+  "ExitConfirmationTitle": "退出 Hyper Battery Monitor？",
+  "ExitConfirmationMessage": "Hyper Battery Monitor 将关闭。所有尚未保存或应用的更改都将丢失。确定要退出吗？"
 }

@@ -102,15 +102,16 @@ public sealed partial class SettingsForm : Form
 
     private void BuildSidebar()
     {
-        string[] keys = { "Device", "Interface", "BatteryMonitor", "Notifications", "About" };
-        Glyph[] glyphs = { Glyph.Headphones, Glyph.Monitor, Glyph.Battery, Glyph.Bell, Glyph.Info };
+        string[] keys = { "Device", "Interface", "BatteryMonitor", "Notifications", "About", "Exit" };
+        Glyph[] glyphs = { Glyph.Headphones, Glyph.Monitor, Glyph.Battery, Glyph.Bell, Glyph.Info, Glyph.Info };
         string[] iconKeys =
         {
             "device",
             "interface",
             "battery_monitor",
             "notification",
-            "about"
+            "about",
+            "common:exit"
         };
         int y = 4;
 
@@ -121,14 +122,14 @@ public sealed partial class SettingsForm : Form
                 Text = L(GetSidebarLocalizationKey(keys[i])),
                 Tag = keys[i],
                 Location = new Point(6, y),
-                Size = new Size(168, 40),
+                Size = new Size(168, 38),
                 Font = new Font("Segoe UI", 9.5f),
                 Cursor = Cursors.Hand
             };
             item.Click += Navigation_Click;
             _sidebar.Controls.Add(item);
             _navButtons[keys[i]] = item;
-            y += 46;
+            y += 40;
         }
     }
 
@@ -819,6 +820,7 @@ public sealed partial class SettingsForm : Form
         return navigationKey switch
         {
             "BatteryMonitor" => "Battery",
+            "Exit" => "ContextMenuExit",
             _ => navigationKey
         };
     }
@@ -827,7 +829,166 @@ public sealed partial class SettingsForm : Form
     {
         if (sender is not SidebarItem item || item.Tag is not string key)
             return;
+        if (key == "Exit")
+        {
+            RequestExitFromSettings();
+            return;
+        }
+
         ShowPage(key);
+    }
+
+    private void RequestExitFromSettings()
+    {
+        // Do not interrupt a device-specific operation that is already being applied.
+        if (_autoPowerOffApplying)
+            return;
+
+        if (ShowExitConfirmationDialog())
+            ExitRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool ShowExitConfirmationDialog()
+    {
+        // Reuse HBM's existing rounded modal, icon cache, warning glyph and themed
+        // ActionButton machinery. Pending changes are intentionally NOT applied here.
+        bool dark = EffectiveTheme == AppTheme.Dark;
+        Color background = dark ? DarkBackground : LightBackground;
+        Color cardFill = dark ? Color.FromArgb(42, 45, 48) : Color.FromArgb(248, 249, 251);
+        Color foreground = dark ? Color.WhiteSmoke : LightText;
+        Color border = dark ? DarkBorder : LightBorder;
+        string title = L("ExitConfirmationTitle");
+        string message = L("ExitConfirmationMessage");
+        string okText = L("Ok");
+        string cancelText = L("Cancel");
+
+        Rectangle workArea = Screen.FromControl(this).WorkingArea;
+        int dialogWidth = Math.Min(ScaleUi(480), Math.Max(1, workArea.Width - ScaleUi(24)));
+        int outer = ScaleUi(18);
+        int headerTop = ScaleUi(14);
+        int headerInset = ScaleUi(56);
+        int cardTop = ScaleUi(58);
+        int cardWidth = Math.Max(1, dialogWidth - outer * 2);
+        int messageLeft = ScaleUi(55);
+        int messageWidth = Math.Max(1, cardWidth - messageLeft - ScaleUi(15));
+        using Font titleFont = new("Segoe UI Semibold", 10.5f);
+        using Font bodyFont = new("Segoe UI", 9f);
+        using Font buttonFont = new("Segoe UI", 8.8f);
+
+        int titleHeight = TextRenderer.MeasureText(title, titleFont,
+            new Size(Math.Max(1, dialogWidth - headerInset - outer), 32767),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + ScaleUi(4);
+        cardTop = Math.Max(cardTop, headerTop + titleHeight + ScaleUi(8));
+        int messageHeight = TextRenderer.MeasureText(message, bodyFont,
+            new Size(messageWidth, 32767),
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + ScaleUi(10);
+        int cardHeight = Math.Max(ScaleUi(92), messageHeight + ScaleUi(28));
+        int buttonGap = ScaleUi(10);
+        int buttonHeight = ScaleUi(34);
+        int availableButtonWidth = Math.Max(1, dialogWidth - outer * 2);
+        int confirmWidth = Math.Max(ScaleUi(96),
+            TextRenderer.MeasureText(okText, buttonFont).Width + ScaleUi(34));
+        int cancelWidth = Math.Max(ScaleUi(96),
+            TextRenderer.MeasureText(cancelText, buttonFont).Width + ScaleUi(34));
+        bool stackButtons = confirmWidth + cancelWidth + buttonGap > availableButtonWidth;
+        int buttonsHeight = stackButtons ? buttonHeight * 2 + buttonGap : buttonHeight;
+        int buttonTop = cardTop + cardHeight + ScaleUi(16);
+        int dialogHeight = buttonTop + buttonsHeight + outer;
+
+        using Form dialog = new()
+        {
+            Text = title,
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.None,
+            AutoScaleMode = AutoScaleMode.None,
+            ClientSize = new Size(dialogWidth, dialogHeight),
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            ShowIcon = false,
+            BackColor = background,
+            ForeColor = foreground,
+            Font = new Font("Segoe UI", 9f)
+        };
+        dialog.SizeChanged += (_, _) => ApplyRoundedDialogRegion(dialog);
+        ApplyRoundedDialogRegion(dialog);
+
+        _ = new PngIconControl(_iconCache, "common:exit")
+        {
+            Parent = dialog,
+            DarkMode = dark,
+            BackColor = Color.Transparent,
+            Bounds = new Rectangle(ScaleUi(20), ScaleUi(16), ScaleUi(28), ScaleUi(28))
+        };
+        _ = new Label
+        {
+            Parent = dialog,
+            Text = title,
+            Font = titleFont,
+            ForeColor = foreground,
+            BackColor = Color.Transparent,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Bounds = new Rectangle(headerInset, headerTop,
+                Math.Max(1, dialogWidth - headerInset - outer), titleHeight)
+        };
+
+        RoundedPanel card = new()
+        {
+            Parent = dialog,
+            BackColor = cardFill,
+            OutsideBackColor = background,
+            BorderColor = border,
+            Bounds = new Rectangle(outer, cardTop, cardWidth, cardHeight)
+        };
+        _ = new WarningGlyphPanel
+        {
+            Parent = card,
+            ForeColor = Color.FromArgb(234, 179, 8),
+            BackColor = Color.Transparent,
+            Bounds = new Rectangle(ScaleUi(14), ScaleUi(22), ScaleUi(28), ScaleUi(28))
+        };
+        _ = new Label
+        {
+            Parent = card,
+            Text = message,
+            Font = bodyFont,
+            ForeColor = foreground,
+            BackColor = Color.Transparent,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Bounds = new Rectangle(messageLeft, ScaleUi(12), messageWidth,
+                cardHeight - ScaleUi(24))
+        };
+
+        ActionButton cancel = CreateDialogActionButton(cancelText, dark, false, background);
+        cancel.Parent = dialog;
+        cancel.Font = buttonFont;
+        cancel.DialogResult = DialogResult.Cancel;
+        ActionButton confirm = CreateDialogActionButton(okText, dark, true, background);
+        confirm.Parent = dialog;
+        confirm.Font = buttonFont;
+        confirm.DialogResult = DialogResult.OK;
+
+        if (stackButtons)
+        {
+            cancel.Bounds = new Rectangle(outer, buttonTop, availableButtonWidth, buttonHeight);
+            confirm.Bounds = new Rectangle(outer, buttonTop + buttonHeight + buttonGap,
+                availableButtonWidth, buttonHeight);
+        }
+        else
+        {
+            int right = dialogWidth - outer;
+            confirm.Bounds = new Rectangle(right - confirmWidth, buttonTop, confirmWidth, buttonHeight);
+            cancel.Bounds = new Rectangle(confirm.Left - buttonGap - cancelWidth,
+                buttonTop, cancelWidth, buttonHeight);
+        }
+
+        // The safe action is the default; Escape and closing the dialog never exit.
+        dialog.AcceptButton = cancel;
+        dialog.CancelButton = cancel;
+        dialog.Shown += (_, _) => cancel.Focus();
+        return dialog.ShowDialog(this) == DialogResult.OK;
     }
 
     private void ShowPage(string key)

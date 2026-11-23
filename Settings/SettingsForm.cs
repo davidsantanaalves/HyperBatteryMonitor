@@ -117,7 +117,7 @@ public sealed partial class SettingsForm : Form
     private static readonly Color DarkSecondary = Color.FromArgb(196, 201, 207);
 
     private const int LogicalDpi = 96;
-    private const int SidebarFirstSeparatorLogicalY = 236;
+    private const int SidebarFirstSeparatorLogicalY = 252;
     private const int SidebarSecondSeparatorLogicalY = 458;
     private const int SidebarDeviceCardLogicalHeight = 190;
     private const int SidebarDeviceCardLogicalTop =
@@ -242,6 +242,8 @@ public sealed partial class SettingsForm : Form
     }
 
     public event EventHandler? SettingsApplied;
+    // Raised only after an explicit, themed Exit confirmation; no pending settings are applied.
+    public event EventHandler? ExitRequested;
     // A device-specific monitoring change is persisted by its own modal.
     public event EventHandler<string>? DeviceMonitoringModeSaved;
     public event EventHandler? DeviceAutoPowerOffSnapshotChanged;

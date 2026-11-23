@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Desligamento",
   "SidebarMonitoringMode": "Modo",
   "AutoPowerOffNotSupportedForDevice": "Indisponível para seu dispositivo.",
-  "AutoPowerOffPowerOnToChange": "Necessário que o headset esteja ligado para alterar essa opção."
+  "AutoPowerOffPowerOnToChange": "Necessário que o headset esteja ligado para alterar essa opção.",
+  "ExitConfirmationTitle": "Sair do Hyper Battery Monitor?",
+  "ExitConfirmationMessage": "O Hyper Battery Monitor será fechado. Todas as alterações que não foram salvas ou aplicadas serão perdidas. Deseja sair?"
 }

@@ -73,6 +73,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         };
         _notifyIcon.MouseUp += NotifyIcon_MouseUp;
         SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
+        SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
 
         // Toast activation arrives on a background thread, including on cold launch.
         // The hidden WinForms control marshals all Settings navigation to the UI thread.
@@ -154,6 +155,9 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
 
     private void SystemEvents_UserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
+        // The notification area can change its icon size with Windows scaling.
+        // Refresh on the UI thread, not on the SystemEvents callback thread.
+        QueueTrayIconRefresh();
         if (_settings.Theme != AppTheme.System || _trayMenu == null || _trayMenu.IsDisposed)
             return;
 
@@ -168,6 +172,27 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             {
                 // The application is shutting down or the handle is no longer valid.
             }
+        }
+    }
+
+    private void SystemEvents_DisplaySettingsChanged(object? sender, EventArgs e) =>
+        QueueTrayIconRefresh();
+
+    private void QueueTrayIconRefresh()
+    {
+        if (_toastActivationDispatcher.IsDisposed || !_toastActivationDispatcher.IsHandleCreated)
+            return;
+        try
+        {
+            _toastActivationDispatcher.BeginInvoke((MethodInvoker)(() =>
+            {
+                if (!_toastActivationDispatcher.IsDisposed)
+                    UpdateTrayIcon();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            // Shutdown may race a Windows display-preference notification.
         }
     }
 
@@ -308,6 +333,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
             _updateCoordinator,
             InstallDownloadedUpdateAsync);
         _settingsForm.SettingsApplied += SettingsForm_SettingsApplied;
+        _settingsForm.ExitRequested += ExitApplication;
         _settingsForm.DeviceMonitoringModeSaved += SettingsForm_DeviceMonitoringModeSaved;
         _settingsForm.DeviceAutoPowerOffSnapshotChanged += SettingsForm_DeviceAutoPowerOffSnapshotChanged;
         _settingsForm.FormClosed += SettingsForm_FormClosed;
@@ -397,6 +423,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         if (sender is SettingsForm form)
         {
             form.SettingsApplied -= SettingsForm_SettingsApplied;
+            form.ExitRequested -= ExitApplication;
             form.DeviceMonitoringModeSaved -= SettingsForm_DeviceMonitoringModeSaved;
             form.DeviceAutoPowerOffSnapshotChanged -= SettingsForm_DeviceAutoPowerOffSnapshotChanged;
         }
@@ -942,83 +969,121 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private string GetThemePrefix() =>
         GetEffectiveTheme() == AppTheme.Dark ? "dark" : "light";
 
-    private Icon LoadIconFile(string fileName)
+    // Use the DPI of the Windows notification-area taskbar, not the Settings
+    // window (which may be on another monitor with a different scale factor).
+    private static int GetTrayIconPixelSize()
+    {
+        try
+        {
+            IntPtr taskbar = FindWindowNative("Shell_TrayWnd", null);
+            uint dpi = taskbar != IntPtr.Zero ? GetDpiForWindowNative(taskbar) : 0;
+            if (dpi == 0)
+                dpi = 96;
+            int pixels = GetSystemMetricsForDpiNative(49, dpi); // SM_CXSMICON
+            if (pixels > 0)
+                return Math.Clamp(pixels, 16, 256);
+        }
+        catch (EntryPointNotFoundException) { /* Windows fallback below */ }
+        catch (DllNotFoundException) { /* Windows fallback below */ }
+        return Math.Max(16, SystemInformation.SmallIconSize.Width);
+    }
+
+    [DllImport("user32.dll", EntryPoint = "FindWindowW", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowNative(string? className, string? windowName);
+
+    [DllImport("user32.dll", EntryPoint = "GetDpiForWindow")]
+    private static extern uint GetDpiForWindowNative(IntPtr hwnd);
+
+    [DllImport("user32.dll", EntryPoint = "GetSystemMetricsForDpi")]
+    private static extern int GetSystemMetricsForDpiNative(int index, uint dpi);
+
+    private static int GetSourceIconSize(int targetPixels)
+    {
+        foreach (int nativeSize in new[] { 16, 24, 32, 48, 64, 128, 256 })
+            if (targetPixels <= nativeSize)
+                return nativeSize;
+        return 256;
+    }
+
+    private Icon LoadIconFile(string fileName, int? sourceSize = null)
     {
         string path = AssetPaths.GetThemeIconPath(
-            GetEffectiveTheme() == AppTheme.Dark,
-            fileName);
-
+            GetEffectiveTheme() == AppTheme.Dark, fileName);
         try
         {
             if (File.Exists(path))
-                return new Icon(path);
+            {
+                int pixels = sourceSize ?? GetTrayIconPixelSize();
+                return new Icon(path, new Size(pixels, pixels));
+            }
         }
-        catch
-        {
-        }
-
+        catch { /* Preserve existing associated-icon fallback. */ }
         return Icon.ExtractAssociatedIcon(Application.ExecutablePath)
             ?? new Icon(SystemIcons.Application, SystemIcons.Application.Size);
     }
 
-	private Icon CreateChargingOverlayIcon(Icon baseIcon)
-	{
-		using Bitmap bitmap =
-			new Bitmap(
-				16,
-				16,
-				PixelFormat.Format32bppArgb);
+    private static void ConfigureTrayGraphics(Graphics graphics)
+    {
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+    }
 
-		using Graphics graphics =
-			Graphics.FromImage(bitmap);
+    // The shipped .ico contains native 16/24/32/48/64/128/256 px frames.
+    // Select a native frame >= the requested output and downsample, never
+    // enlarge a 16x16 bitmap when Windows' taskbar DPI needs 20/24/32+ px.
+    private static Bitmap RasterizeIcon(Icon source, int outputPixels)
+    {
+        using Icon native = new(source, new Size(
+            GetSourceIconSize(outputPixels), GetSourceIconSize(outputPixels)));
+        using Bitmap nativeBitmap = native.ToBitmap();
+        Bitmap bitmap = new(outputPixels, outputPixels, PixelFormat.Format32bppArgb);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        ConfigureTrayGraphics(graphics);
+        graphics.CompositingMode = CompositingMode.SourceCopy;
+        graphics.Clear(Color.Transparent);
+        graphics.DrawImage(nativeBitmap,
+            new Rectangle(0, 0, outputPixels, outputPixels),
+            new Rectangle(0, 0, nativeBitmap.Width, nativeBitmap.Height),
+            GraphicsUnit.Pixel);
+        return bitmap;
+    }
 
-		graphics.SmoothingMode =
-			SmoothingMode.AntiAlias;
+    private Bitmap RenderThemeBitmap(int pixels)
+    {
+        using Icon source = LoadIconFile($"{GetThemePrefix()}.ico", GetSourceIconSize(pixels));
+        return RasterizeIcon(source, pixels);
+    }
 
-		graphics.InterpolationMode =
-			InterpolationMode.HighQualityBicubic;
+    private Icon CreateChargingOverlayIcon(Icon baseIcon)
+    {
+        int pixels = GetTrayIconPixelSize();
+        using Bitmap bitmap = new(pixels, pixels, PixelFormat.Format32bppArgb);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        ConfigureTrayGraphics(graphics);
+        graphics.Clear(Color.Transparent);
+        using Bitmap iconBitmap = RasterizeIcon(baseIcon, pixels);
+        // All bolt geometry is authored at logical 16x16; scale its strokes
+        // and paths together with the original headset bitmap.
+        graphics.ScaleTransform(pixels / 16f, pixels / 16f);
+        graphics.DrawImage(iconBitmap, 0, 0, 16, 16);
 
-		graphics.PixelOffsetMode =
-			PixelOffsetMode.HighQuality;
+        if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
+            _settings.AdvancedDisplayMode == AdvancedDisplayMode.BatteryIndicator)
+            DrawChargingBoltInsideBattery(graphics);
+        else if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
+            _settings.AdvancedDisplayMode == AdvancedDisplayMode.PercentageText)
+            DrawChargingBoltAfterPercentage(graphics);
+        else if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
+            _settings.AdvancedDisplayMode == AdvancedDisplayMode.BatteryGradient)
+            DrawChargingBoltCentered(graphics);
+        else
+            DrawChargingBoltOnRight(graphics);
 
-		graphics.Clear(Color.Transparent);
-
-		using Bitmap iconBitmap =
-			RenderIcon(
-				baseIcon,
-				16,
-				16,
-				replacementColor: null);
-
-		graphics.DrawImage(
-			iconBitmap,
-			0,
-			0,
-			16,
-			16);
-
-		if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
-			_settings.AdvancedDisplayMode == AdvancedDisplayMode.BatteryIndicator)
-		{
-			DrawChargingBoltInsideBattery(graphics);
-		}
-		else if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
-			_settings.AdvancedDisplayMode == AdvancedDisplayMode.PercentageText)
-		{
-			DrawChargingBoltAfterPercentage(graphics);
-		}
-		else if (_settings.DisplayMode == BatteryDisplayMode.Advanced &&
-			_settings.AdvancedDisplayMode == AdvancedDisplayMode.BatteryGradient)
-		{
-			DrawChargingBoltCentered(graphics);
-		}
-		else
-		{
-			DrawChargingBoltOnRight(graphics);
-		}
-
-		return BitmapToIcon(bitmap);
-	}
+        graphics.ResetTransform();
+        return BitmapToIcon(bitmap);
+    }
 
 	private void DrawChargingBoltCentered(Graphics graphics)
 	{
@@ -1170,297 +1235,85 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
     private Icon CreateThemeIcon() =>
         LoadIconFile($"{GetThemePrefix()}.ico");
 
-    private Icon CreateRenderedIcon(
-        Color batteryColor,
-        int? battery,
-        bool colorizeHeadset)
+    private Icon CreateRenderedIcon(Color batteryColor, int? battery, bool colorizeHeadset)
     {
-        // Battery-gradient mode preserves the exact 16x16 scale of the
-        // static tray icon and changes only its color.
+        int pixels = GetTrayIconPixelSize();
         if (colorizeHeadset && !battery.HasValue)
         {
-            using Bitmap bitmap =
-                new Bitmap(
-                    16,
-                    16,
-                    PixelFormat.Format32bppArgb);
-
-            using Graphics graphics =
-                Graphics.FromImage(bitmap);
-
-            graphics.SmoothingMode =
-                SmoothingMode.AntiAlias;
-
-            graphics.InterpolationMode =
-                InterpolationMode.HighQualityBicubic;
-
-            graphics.PixelOffsetMode =
-                PixelOffsetMode.HighQuality;
-
-            graphics.Clear(Color.Transparent);
-
-            using Icon source = CreateThemeIcon();
-
-            using Bitmap iconBitmap =
-                RenderIcon(
-                    source,
-                    16,
-                    16,
-                    batteryColor);
-
-            graphics.DrawImage(
-                iconBitmap,
-                0,
-                0,
-                16,
-                16);
-
-            return BitmapToIcon(bitmap);
+            using Bitmap headset = RenderThemeBitmap(pixels);
+            // Recolor per-pixel while keeping the high-resolution icon's
+            // original alpha coverage (including its antialiased edges).
+            for (int y = 0; y < headset.Height; y++)
+            for (int x = 0; x < headset.Width; x++)
+            {
+                Color sourcePixel = headset.GetPixel(x, y);
+                if (sourcePixel.A != 0)
+                    headset.SetPixel(x, y, Color.FromArgb(sourcePixel.A,
+                        batteryColor.R, batteryColor.G, batteryColor.B));
+            }
+            return BitmapToIcon(headset);
         }
 
-        using Bitmap compositeBitmap =
-            new Bitmap(
-                16,
-                16,
-                PixelFormat.Format32bppArgb);
-
-        using Graphics compositeGraphics =
-            Graphics.FromImage(compositeBitmap);
-
-        compositeGraphics.SmoothingMode =
-            SmoothingMode.AntiAlias;
-
-        compositeGraphics.InterpolationMode =
-            InterpolationMode.HighQualityBicubic;
-
-        compositeGraphics.PixelOffsetMode =
-            PixelOffsetMode.HighQuality;
-
-        compositeGraphics.Clear(Color.Transparent);
-
-        using Icon compositeSource = CreateThemeIcon();
-
-        // This layout is exclusively for the advanced battery-indicator
-        // mode: the headset is on the left and the battery is beside it.
-        const int headsetWidth = 11;
-        const int headsetHeight = 16;
-
-        using Bitmap headsetBitmap =
-            RenderIcon(
-                compositeSource,
-                headsetWidth,
-                headsetHeight,
-                null);
-
-        compositeGraphics.DrawImage(
-            headsetBitmap,
-            0,
-            0,
-            headsetWidth,
-            headsetHeight);
-
+        using Bitmap composite = new(pixels, pixels, PixelFormat.Format32bppArgb);
+        using Graphics graphics = Graphics.FromImage(composite);
+        ConfigureTrayGraphics(graphics);
+        graphics.Clear(Color.Transparent);
+        using Bitmap headsetBitmap = RenderThemeBitmap(pixels);
+        graphics.ScaleTransform(pixels / 16f, pixels / 16f);
+        // Preserve the headset-left/battery-right composition and margins.
+        graphics.DrawImage(headsetBitmap, 0, 0, 11, 16);
         if (battery.HasValue)
-        {
-            DrawBattery(
-                compositeGraphics,
-                9,
-                1,
-                7,
-                14,
-                battery.Value,
-                batteryColor);
-        }
-
-        return BitmapToIcon(compositeBitmap);
+            DrawBattery(graphics, 9, 1, 7, 14, battery.Value, batteryColor);
+        graphics.ResetTransform();
+        return BitmapToIcon(composite);
     }
 
-    private Icon CreatePercentageOverlayIcon(
-        int battery,
-        bool connected)
+    private Icon CreatePercentageOverlayIcon(int battery, bool connected)
     {
-        using Bitmap bitmap =
-            new Bitmap(
-                16,
-                16,
-                PixelFormat.Format32bppArgb);
-
-        using Graphics graphics =
-            Graphics.FromImage(bitmap);
-
-        graphics.SmoothingMode =
-            SmoothingMode.AntiAlias;
-
-        graphics.InterpolationMode =
-            InterpolationMode.HighQualityBicubic;
-
-        graphics.PixelOffsetMode =
-            PixelOffsetMode.HighQuality;
-
+        int pixels = GetTrayIconPixelSize();
+        using Bitmap bitmap = new(pixels, pixels, PixelFormat.Format32bppArgb);
+        using Graphics graphics = Graphics.FromImage(bitmap);
+        ConfigureTrayGraphics(graphics);
         graphics.Clear(Color.Transparent);
+        using Bitmap iconBitmap = RenderThemeBitmap((int)Math.Ceiling(pixels * 18f / 16f));
+        graphics.ScaleTransform(pixels / 16f, pixels / 16f);
+        graphics.DrawImage(iconBitmap, -1, -1, 18, 18);
 
-        using Icon source = CreateThemeIcon();
-
-        using Bitmap iconBitmap =
-            RenderIcon(
-                source,
-                18,
-                18,
-                replacementColor: null);
-
-        graphics.DrawImage(
-            iconBitmap,
-            -1,
-            -1,
-            18,
-            18);
-
-        Color textColor =
-            connected
-                ? GetBatteryColor(battery)
-                : Color.Red;
-
-        using var font =
-            new Font(
-                "Segoe UI",
-                5.5f,
-                FontStyle.Bold,
-                GraphicsUnit.Point);
-
+        Color textColor = connected ? GetBatteryColor(battery) : Color.Red;
+        using Font font = new("Segoe UI", 5.5f, FontStyle.Bold, GraphicsUnit.Point);
         string text = $"{battery}%";
-
-        SizeF size =
-            graphics.MeasureString(
-                text,
-                font);
-
-        // Center the percentage over the headset and place a compact,
-        // high-contrast background behind it so it remains readable.
-        float backgroundWidth =
-            Math.Min(15f, size.Width + 4f);
-
+        SizeF size = graphics.MeasureString(text, font);
+        float backgroundWidth = Math.Min(15f, size.Width + 4f);
         const float backgroundHeight = 8f;
-
-        float backgroundX =
-            (16f - backgroundWidth) / 2f;
-
-        float backgroundY =
-            (16f - backgroundHeight) / 2f;
-
-        Color backgroundColor =
-            GetEffectiveTheme() == AppTheme.Dark
-                ? Color.FromArgb(205, 20, 20, 22)
-                : Color.FromArgb(215, 245, 245, 245);
-
-        using var backgroundBrush =
-            new SolidBrush(backgroundColor);
-
-        using var backgroundPath =
-            new GraphicsPath();
-
+        float backgroundX = (16f - backgroundWidth) / 2f;
+        float backgroundY = (16f - backgroundHeight) / 2f;
+        Color backgroundColor = GetEffectiveTheme() == AppTheme.Dark
+            ? Color.FromArgb(205, 20, 20, 22) : Color.FromArgb(215, 245, 245, 245);
+        using SolidBrush backgroundBrush = new(backgroundColor);
+        using GraphicsPath backgroundPath = new();
         const float radius = 2f;
         float diameter = radius * 2f;
-
-        backgroundPath.AddArc(
-            backgroundX,
-            backgroundY,
-            diameter,
-            diameter,
-            180,
-            90);
-
-        backgroundPath.AddArc(
-            backgroundX + backgroundWidth - diameter,
-            backgroundY,
-            diameter,
-            diameter,
-            270,
-            90);
-
-        backgroundPath.AddArc(
-            backgroundX + backgroundWidth - diameter,
-            backgroundY + backgroundHeight - diameter,
-            diameter,
-            diameter,
-            0,
-            90);
-
-        backgroundPath.AddArc(
-            backgroundX,
-            backgroundY + backgroundHeight - diameter,
-            diameter,
-            diameter,
-            90,
-            90);
-
+        backgroundPath.AddArc(backgroundX, backgroundY, diameter, diameter, 180, 90);
+        backgroundPath.AddArc(backgroundX + backgroundWidth - diameter, backgroundY,
+            diameter, diameter, 270, 90);
+        backgroundPath.AddArc(backgroundX + backgroundWidth - diameter,
+            backgroundY + backgroundHeight - diameter, diameter, diameter, 0, 90);
+        backgroundPath.AddArc(backgroundX, backgroundY + backgroundHeight - diameter,
+            diameter, diameter, 90, 90);
         backgroundPath.CloseFigure();
         graphics.FillPath(backgroundBrush, backgroundPath);
-
-        float x =
-            backgroundX +
-            (backgroundWidth - size.Width) / 2f;
-
-        float y =
-            backgroundY +
-            (backgroundHeight - size.Height) / 2f -
-            0.8f;
-
-        using var outlineBrush =
-            new SolidBrush(
-                GetEffectiveTheme() == AppTheme.Dark
-                    ? Color.Black
-                    : Color.White);
-
-        // Stronger outline around the percentage.
+        float x = backgroundX + (backgroundWidth - size.Width) / 2f;
+        float y = backgroundY + (backgroundHeight - size.Height) / 2f - 0.8f;
+        using SolidBrush outlineBrush = new(GetEffectiveTheme() == AppTheme.Dark
+            ? Color.Black : Color.White);
         graphics.DrawString(text, font, outlineBrush, x - 0.7f, y);
         graphics.DrawString(text, font, outlineBrush, x + 0.7f, y);
         graphics.DrawString(text, font, outlineBrush, x, y - 0.7f);
         graphics.DrawString(text, font, outlineBrush, x, y + 0.7f);
-
-        using var brush =
-            new SolidBrush(textColor);
-
-        graphics.DrawString(
-            text,
-            font,
-            brush,
-            x,
-            y);
-
+        using SolidBrush brush = new(textColor);
+        graphics.DrawString(text, font, brush, x, y);
+        graphics.ResetTransform();
         return BitmapToIcon(bitmap);
-    }
-
-    private static Bitmap RenderIcon(Icon source, int width, int height, Color? replacementColor)
-    {
-        var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        using Graphics graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.Transparent);
-        graphics.DrawIcon(source, new Rectangle(0, 0, width, height));
-
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                if (!replacementColor.HasValue)
-                    continue;
-
-                Color pixel = bitmap.GetPixel(x, y);
-
-                if (pixel.A > 0)
-                {
-                    Color replacement = replacementColor.Value;
-
-                    bitmap.SetPixel(
-                        x,
-                        y,
-                        Color.FromArgb(
-                            pixel.A,
-                            replacement.R,
-                            replacement.G,
-                            replacement.B));
-                }
-            }
-        }
-        return bitmap;
     }
 
     private void DrawBattery(
@@ -1694,6 +1547,7 @@ public sealed class HyperXBatteryMonitorApplicationContext : ApplicationContext
         _leftClickTimer = null;
 
         SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged;
+        SystemEvents.DisplaySettingsChanged -= SystemEvents_DisplaySettingsChanged;
         _notifyIcon.MouseUp -= NotifyIcon_MouseUp;
         _trayMenu?.Close();
         _trayMenu?.Dispose();

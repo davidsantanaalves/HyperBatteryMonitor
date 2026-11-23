@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "자동 전원 끔",
   "SidebarMonitoringMode": "모드",
   "AutoPowerOffNotSupportedForDevice": "이 장치에서는 사용할 수 없습니다.",
-  "AutoPowerOffPowerOnToChange": "이 옵션을 변경하려면 헤드셋 전원이 켜져 있어야 합니다."
+  "AutoPowerOffPowerOnToChange": "이 옵션을 변경하려면 헤드셋 전원이 켜져 있어야 합니다.",
+  "ExitConfirmationTitle": "Hyper Battery Monitor를 종료하시겠습니까?",
+  "ExitConfirmationMessage": "Hyper Battery Monitor가 종료됩니다. 저장하거나 적용하지 않은 변경 사항은 모두 사라집니다. 종료하시겠습니까?"
 }

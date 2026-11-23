@@ -224,26 +224,30 @@ internal sealed class TrayContextMenuForm : Form
             Size = new Size(MenuLogicalWidth, ButtonBarLogicalHeight),
             BackColor = Color.Transparent
         };
-        _settingsButton = new TrayMenuButton(_iconCache, "config")
+        // The two action surfaces sit inside the footer. The separators are
+        // drawn by the parent panel, outside the rounded hover backgrounds.
+        _buttonBar.Paint += (_, e) =>
         {
-            Location = new Point(0, 0),
-            Size = new Size(MenuLogicalWidth / 2, 55),
-            OutsideBackColor = Color.Transparent,
-            DrawTopSeparator = true,
-            DrawRightSeparator = true
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float stroke = Math.Max(1f, PngIconCache.ScaleLogical(1f, DeviceDpi));
+            Color lineColor = _dark ? Color.FromArgb(85, 89, 94) : Color.FromArgb(205, 211, 218);
+            using Pen pen = new(lineColor, stroke);
+            float topY = stroke / 2f;
+            float middleX = _buttonBar.ClientSize.Width / 2f;
+            e.Graphics.DrawLine(pen, ScaleTray(8), topY,
+                _buttonBar.ClientSize.Width - ScaleTray(8), topY);
+            e.Graphics.DrawLine(pen, middleX, ScaleTray(12),
+                middleX, _buttonBar.ClientSize.Height - ScaleTray(12));
         };
-        _exitButton = new TrayMenuButton(_iconCache, "exit")
-        {
-            Location = new Point(MenuLogicalWidth / 2, 0),
-            Size = new Size(MenuLogicalWidth / 2, 55),
-            OutsideBackColor = Color.Transparent,
-            DrawTopSeparator = true
-        };
+        _settingsButton = new TrayMenuButton(_iconCache, "config");
+        // Explicitly use the shared red exit artwork, regardless of dark/light theme.
+        _exitButton = new TrayMenuButton(_iconCache, "common:exit");
         _settingsButton.Click += (_, _) => { Hide(); _settingsAction(null, EventArgs.Empty); };
         _exitButton.Click += (_, _) => { Hide(); _exitAction(null, EventArgs.Empty); };
         _buttonBar.Controls.Add(_settingsButton);
         _buttonBar.Controls.Add(_exitButton);
         Controls.Add(_buttonBar);
+        LayoutFooterButtons();
 
         _toolTip = new ToolTip { AutomaticDelay = 350, InitialDelay = 350, ReshowDelay = 100, AutoPopDelay = 5000 };
         _settingsButton.MouseEnter += (_, _) => _toolTip?.SetToolTip(_settingsButton, Localization.Get("ContextMenuSettings", _settings.Language));
@@ -379,6 +383,7 @@ internal sealed class TrayContextMenuForm : Form
         _buttonBar.Bounds = new Rectangle(0,
             ClientSize.Height - ScaleTray(ButtonBarLogicalHeight),
             ClientSize.Width, ScaleTray(ButtonBarLogicalHeight));
+        LayoutFooterButtons();
         _statusDivider.Bounds = new Rectangle(ScaleTray(9), ScaleTray(69),
             ClientSize.Width - ScaleTray(18), ScaleTray(1));
         _deviceImage.Bounds = new Rectangle(ScaleTray(8), ScaleTray(7), ScaleTray(48), ScaleTray(48));
@@ -387,6 +392,23 @@ internal sealed class TrayContextMenuForm : Form
         _statusDot.Bounds = new Rectangle(ScaleTray(59), ScaleTray(42), ScaleTray(18), ScaleTray(18));
         _statusText.Bounds = new Rectangle(ScaleTray(80), ScaleTray(42),
             ClientSize.Width - ScaleTray(87), ScaleTray(20));
+    }
+
+    private void LayoutFooterButtons()
+    {
+        // Equal-size actions, a central divider and independent rounded hover
+        // surfaces. Always use the current DPI (including on monitor changes).
+        int midpoint = _buttonBar.ClientSize.Width / 2;
+        int outerMargin = ScaleTray(7);
+        int dividerGap = ScaleTray(6);
+        int verticalMargin = ScaleTray(8);
+        int buttonHeight = Math.Max(1, _buttonBar.ClientSize.Height - verticalMargin * 2);
+        _settingsButton.Bounds = new Rectangle(outerMargin, verticalMargin,
+            Math.Max(1, midpoint - dividerGap - outerMargin), buttonHeight);
+        int exitLeft = midpoint + dividerGap;
+        _exitButton.Bounds = new Rectangle(exitLeft, verticalMargin,
+            Math.Max(1, _buttonBar.ClientSize.Width - exitLeft - outerMargin), buttonHeight);
+        _buttonBar.Invalidate();
     }
 
     private int ScaleTray(int logical) => PngIconCache.ScaleLogicalToInt(logical, DeviceDpi);
@@ -431,8 +453,12 @@ internal sealed class TrayContextMenuForm : Form
         _microphoneTitle.Text = Localization.Get("SidebarMicrophone", _settings.Language);
         _autoPowerOffTitle.Text = Localization.Get("SidebarAutoPowerOff", _settings.Language);
         _monitoringTitle.Text = Localization.Get("SidebarMonitoringMode", _settings.Language);
-        _toolTip?.SetToolTip(_settingsButton, Localization.Get("ContextMenuSettings", _settings.Language));
-        _toolTip?.SetToolTip(_exitButton, Localization.Get("ContextMenuExit", _settings.Language));
+        _settingsButton.Text = Localization.Get("ContextMenuSettings", _settings.Language);
+        _exitButton.Text = Localization.Get("ContextMenuExit", _settings.Language);
+        _settingsButton.AccessibleName = _settingsButton.Text;
+        _exitButton.AccessibleName = _exitButton.Text;
+        _toolTip?.SetToolTip(_settingsButton, _settingsButton.Text);
+        _toolTip?.SetToolTip(_exitButton, _exitButton.Text);
         UpdateDevice(
             _device,
             _charging,
@@ -477,13 +503,9 @@ internal sealed class TrayContextMenuForm : Form
         _statusDot.Invalidate();
         _batteryIcon.DarkMode = dark;
         _settingsButton.DarkMode = dark;
-        _settingsButton.OutsideBackColor = dark
-            ? Color.FromArgb(45, 48, 51)
-            : Color.FromArgb(247, 248, 250);
+        _settingsButton.OutsideBackColor = BackColor;
         _exitButton.DarkMode = dark;
-        _exitButton.OutsideBackColor = dark
-            ? Color.FromArgb(45, 48, 51)
-            : Color.FromArgb(247, 248, 250);
+        _exitButton.OutsideBackColor = BackColor;
         _buttonBar.Invalidate();
         Invalidate(true);
     }
@@ -525,8 +547,13 @@ internal sealed class TrayContextMenuForm : Form
         if (ClientSize != expectedClientSize)
             ClientSize = expectedClientSize;
         if (_buttonBar != null)
-            _buttonBar.Location = new Point(0,
-                ClientSize.Height - PngIconCache.ScaleLogicalToInt(ButtonBarLogicalHeight, DeviceDpi));
+        {
+            _buttonBar.Bounds = new Rectangle(0,
+                ClientSize.Height - PngIconCache.ScaleLogicalToInt(ButtonBarLogicalHeight, DeviceDpi),
+                ClientSize.Width, PngIconCache.ScaleLogicalToInt(ButtonBarLogicalHeight, DeviceDpi));
+            if (_settingsButton != null && _exitButton != null)
+                LayoutFooterButtons();
+        }
     }
 
     protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -706,8 +733,8 @@ internal sealed class TrayContextMenuForm : Form
 
 internal sealed class TrayMenuButton : Control
 {
-    private const float IconLogicalSize = 25f;
-    private const float SeparatorLogicalWidth = 1f;
+    private const int IconLogicalSize = 21;
+    private const int HoverRadiusLogical = 7;
 
     private readonly PngIconCache _iconCache;
     private readonly string _iconKey;
@@ -719,49 +746,99 @@ internal sealed class TrayMenuButton : Control
     public bool DarkMode { get => _dark; set { _dark = value; Invalidate(); } }
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color OutsideBackColor { get; set; } = Color.Transparent;
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public bool DrawTopSeparator { get; set; }
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public bool DrawRightSeparator { get; set; }
 
     public TrayMenuButton(PngIconCache iconCache, string iconKey)
     {
         _iconCache = iconCache;
         _iconKey = iconKey;
+        Font = new Font("Segoe UI", 8.5f);
         Cursor = Cursors.Hand;
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        TabStop = true;
+        AccessibleRole = AccessibleRole.PushButton;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         MouseEnter += (_, _) => { _hover = true; Invalidate(); };
         MouseLeave += (_, _) => { _hover = false; _pressed = false; Invalidate(); };
         MouseDown += (_, e) => { if (e.Button == MouseButtons.Left) { _pressed = true; Invalidate(); } };
         MouseUp += (_, _) => { _pressed = false; Invalidate(); };
+        GotFocus += (_, _) => Invalidate();
+        LostFocus += (_, _) => Invalidate();
+    }
+
+    protected override bool IsInputKey(Keys keyData) =>
+        keyData == Keys.Enter || keyData == Keys.Space || base.IsInputKey(keyData);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            OnClick(EventArgs.Empty);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+        base.OnKeyDown(e);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         e.Graphics.Clear(OutsideBackColor);
-        Color fill = _pressed
-            ? (_dark ? Color.FromArgb(35, 39, 42) : Color.FromArgb(225, 229, 235))
-            : _hover
-                ? (_dark ? Color.FromArgb(17, 23, 34) : Color.FromArgb(208, 208, 208))
-                : (_dark ? Color.FromArgb(35, 47, 70) : Color.FromArgb(238, 238, 238));
-        using (Brush brush = new SolidBrush(fill))
-            e.Graphics.FillRectangle(brush, ClientRectangle);
-        float separatorWidth = Math.Max(1f, PngIconCache.ScaleLogical(SeparatorLogicalWidth, DeviceDpi));
-        using Pen separatorPen = new(_dark ? Color.FromArgb(70, 74, 78) : Color.FromArgb(215, 220, 226), separatorWidth);
-        if (DrawTopSeparator)
-            e.Graphics.DrawLine(separatorPen, 0, separatorWidth / 2f, Width - 1, separatorWidth / 2f);
-        if (DrawRightSeparator)
-            e.Graphics.DrawLine(separatorPen, Width - separatorWidth / 2f, 0, Width - separatorWidth / 2f, Height);
 
-        float iconSize = PngIconCache.ScaleLogical(IconLogicalSize, DeviceDpi);
-        _iconCache.Draw(
-            e.Graphics,
-            _iconKey,
-            new RectangleF((Width - iconSize) / 2f, (Height - iconSize) / 2f, iconSize, iconSize),
-            _dark,
-            DeviceDpi);
+        // Flat gray hover, softly rounded. No border or fill at rest.
+        if (_hover || _pressed || Focused)
+        {
+            Color fill = _pressed
+                ? (_dark ? Color.FromArgb(83, 86, 91) : Color.FromArgb(219, 224, 230))
+                : (_dark ? Color.FromArgb(67, 70, 75) : Color.FromArgb(233, 236, 241));
+            using Brush hoverBrush = new SolidBrush(fill);
+            e.Graphics.FillRoundedRectangle(hoverBrush,
+                new RectangleF(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1)),
+                Math.Max(1, PngIconCache.ScaleLogicalToInt(HoverRadiusLogical, DeviceDpi)));
+        }
+
+        Color textColor = _dark ? Color.WhiteSmoke : Color.FromArgb(31, 39, 50);
+        int inset = PngIconCache.ScaleLogicalToInt(3, DeviceDpi);
+        int gap = PngIconCache.ScaleLogicalToInt(5, DeviceDpi);
+        int iconSize = Math.Min(Math.Max(1, Width - inset * 2),
+            PngIconCache.ScaleLogicalToInt(IconLogicalSize, DeviceDpi));
+        TextFormatFlags single = TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+            TextFormatFlags.SingleLine;
+        Size textSize = TextRenderer.MeasureText(e.Graphics, Text, Font,
+            new Size(int.MaxValue, int.MaxValue), single);
+        int usableWidth = Math.Max(1, Width - inset * 2);
+        if (iconSize + gap + textSize.Width <= usableWidth)
+        {
+            // Reference layout: icon and caption horizontally centered as a unit.
+            int totalWidth = iconSize + gap + textSize.Width;
+            int x = (Width - totalWidth) / 2;
+            int y = (Height - iconSize) / 2;
+            _iconCache.Draw(e.Graphics, _iconKey,
+                new RectangleF(x, y, iconSize, iconSize), _dark, DeviceDpi);
+            TextRenderer.DrawText(e.Graphics, Text, Font,
+                new Rectangle(x + iconSize + gap, 0, textSize.Width, Height), textColor,
+                single | TextFormatFlags.VerticalCenter);
+            return;
+        }
+
+        // A long translation may not fit beside its icon in this compact menu.
+        // Place it below the icon instead of clipping it or widening the menu.
+        int stackedIcon = Math.Min(iconSize, PngIconCache.ScaleLogicalToInt(18, DeviceDpi));
+        int iconTop = PngIconCache.ScaleLogicalToInt(2, DeviceDpi);
+        _iconCache.Draw(e.Graphics, _iconKey,
+            new RectangleF((Width - stackedIcon) / 2f, iconTop,
+                stackedIcon, stackedIcon), _dark, DeviceDpi);
+        int captionTop = iconTop + stackedIcon;
+        int captionHeight = Math.Max(1, Height - captionTop);
+        using Font compactFont = new(Font.FontFamily, Math.Max(7.2f, Font.Size - 0.8f),
+            Font.Style, GraphicsUnit.Point);
+        TextRenderer.DrawText(e.Graphics, Text, compactFont,
+            new Rectangle(inset, captionTop, usableWidth, captionHeight), textColor,
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.WordBreak);
     }
 }
 

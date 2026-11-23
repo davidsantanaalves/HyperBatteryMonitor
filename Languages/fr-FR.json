@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Arrêt auto",
   "SidebarMonitoringMode": "Mode",
   "AutoPowerOffNotSupportedForDevice": "Indisponible pour votre appareil.",
-  "AutoPowerOffPowerOnToChange": "Le casque doit être allumé pour modifier cette option."
+  "AutoPowerOffPowerOnToChange": "Le casque doit être allumé pour modifier cette option.",
+  "ExitConfirmationTitle": "Quitter Hyper Battery Monitor ?",
+  "ExitConfirmationMessage": "Hyper Battery Monitor va se fermer. Toutes les modifications non enregistrées ou non appliquées seront perdues. Voulez-vous quitter ?"
 }

@@ -164,6 +164,7 @@ public sealed partial class SettingsForm
         private readonly ActionButton _saveButton;
         private readonly ActionButton _cancelButton;
         private bool _saving;
+        private Action? _reflowLayout;
 
         private readonly AutoPowerOffChoiceCard[] _powerChoices;
         private readonly TableLayoutPanel _powerOptions;
@@ -210,11 +211,11 @@ public sealed partial class SettingsForm
                 BackColor = Color.Transparent
             };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 184));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 10));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 151));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            // These sizes are determined by the real text measurements at the current DPI.
+            // Fixed TableLayoutPanel rows left the descriptions clipped at 150% scaling.
+            for (int i = 0; i < 5; i++)
+                root.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));
+            root.AutoScroll = true;
             Controls.Add(root);
 
             Panel header = new() { Dock = DockStyle.Fill, BackColor = Color.Transparent };
@@ -257,17 +258,15 @@ public sealed partial class SettingsForm
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 4,
+                RowCount = 5,
                 Margin = new Padding(0),
                 Padding = new Padding(14, 12, 14, 10),
                 BackColor = Color.Transparent
             };
             monitorLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             monitorLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            monitorLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
-            monitorLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 23));
-            monitorLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
-            monitorLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 5; i++)
+                monitorLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, i == 4 ? 0 : 1));
             monitoring.Controls.Add(monitorLayout);
             // Reuse HBM's existing theme-aware magnifier asset (the same one
             // used by device auto-detection), instead of a font-dependent glyph.
@@ -344,10 +343,8 @@ public sealed partial class SettingsForm
                 BackColor = Color.Transparent
             };
             powerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            powerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
-            powerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-            powerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 47));
-            powerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            for (int i = 0; i < 4; i++)
+                powerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));
             powerOff.Controls.Add(powerLayout);
             Label powerTitle = TextLabel("⏻  " + owner.L("AutoPowerOff"), 10.1f, true, ForeColor);
             Label powerDescription = TextLabel(owner.L("AutoPowerOffDescription"), 8.4f, false, secondary);
@@ -405,14 +402,15 @@ public sealed partial class SettingsForm
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 1,
+                RowCount = 2,
                 Margin = new Padding(0),
                 BackColor = Color.Transparent
             };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 1));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 1));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
             Label footnote = TextLabel(owner.L("DeviceSettingsOnlySelected"), 8f, false, secondary);
             footnote.Margin = new Padding(3, 0, 10, 0);
             footnote.TextAlign = ContentAlignment.MiddleLeft;
@@ -430,8 +428,185 @@ public sealed partial class SettingsForm
 
             AcceptButton = _saveButton;
             CancelButton = _cancelButton;
+
+            bool reflowing = false;
+            void ReflowForCurrentDpi()
+            {
+                if (reflowing || IsDisposed || Disposing) return;
+                reflowing = true;
+                try
+                {
+                    // All measurements below are device pixels. Fonts are measured using
+                    // WinForms' actual rendered size; logical spacing is scaled exactly once.
+                    int Px(int logical) => Math.Max(1,
+                        (int)Math.Ceiling(logical * Math.Max(96, DeviceDpi) / 96f));
+                    int TextHeight(Label control, int width) =>
+                        TextRenderer.MeasureText(control.Text, control.Font,
+                            new Size(Math.Max(1, width), 2048),
+                            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Px(4);
+
+                    Rectangle work = Screen.FromControl(this).WorkingArea;
+                    int dialogWidth = Math.Max(1, Math.Min(Px(556), work.Width - Px(24)));
+                    int contentWidth = Math.Max(Px(120), dialogWidth - Px(32));
+                    int contentInnerWidth = Math.Max(Px(100), contentWidth - Px(28));
+                    bool narrow = contentInnerWidth < Px(460);
+
+                    root.Padding = new Padding(Px(16), Px(14), Px(16), Px(12));
+                    monitorLayout.Padding = new Padding(Px(14), Px(12), Px(14), Px(10));
+                    powerLayout.Padding = new Padding(Px(14), Px(10), Px(14), Px(9));
+
+                    int headerTextWidth = Math.Max(Px(70), contentWidth - Px(48));
+                    int titleHeight = Math.Max(Px(30), TextHeight(title, headerTextWidth));
+                    int subtitleHeight = Math.Max(Px(23), TextHeight(subtitle, headerTextWidth));
+                    title.Bounds = new Rectangle(Px(4), Px(1), headerTextWidth, titleHeight);
+                    subtitle.Bounds = new Rectangle(Px(4), titleHeight + Px(2),
+                        headerTextWidth, subtitleHeight);
+                    close.Bounds = new Rectangle(Math.Max(0, contentWidth - Px(36)), 0,
+                        Px(34), Px(32));
+                    int headerHeight = titleHeight + subtitleHeight + Px(8);
+
+                    monitoringHeader.ColumnStyles[0].Width = Px(26);
+                    monitoringIcon.Size = new Size(Px(22), Px(22));
+                    int monitorHeaderHeight = Math.Max(Px(28),
+                        TextHeight(monitoringTitle, contentInnerWidth - Px(26)));
+                    int monitorDescriptionHeight = Math.Max(Px(23),
+                        TextHeight(monitoringDescription, contentInnerWidth));
+                    int warningHeight = Math.Max(Px(22),
+                        TextHeight(note, contentInnerWidth) + Px(4));
+
+                    int cardWidth = narrow ? contentInnerWidth : (contentInnerWidth - Px(12)) / 2;
+                    int listenHeight = _listenOnlyCard.GetPreferredHeight(cardWidth);
+                    int pollingHeight = _pollingCard.GetPreferredHeight(cardWidth);
+                    int cardHeight = Math.Max(Px(96), Math.Max(listenHeight, pollingHeight));
+                    monitorLayout.RowStyles[0].Height = monitorHeaderHeight;
+                    monitorLayout.RowStyles[1].Height = monitorDescriptionHeight;
+                    monitorLayout.RowStyles[2].Height = cardHeight;
+                    monitorLayout.RowStyles[3].Height = narrow ? cardHeight + Px(8) : warningHeight;
+                    monitorLayout.RowStyles[4].Height = narrow ? warningHeight : 0;
+                    monitorLayout.SetCellPosition(_listenOnlyCard,
+                        new TableLayoutPanelCellPosition(0, 2));
+                    monitorLayout.SetCellPosition(_pollingCard,
+                        new TableLayoutPanelCellPosition(narrow ? 0 : 1, narrow ? 3 : 2));
+                    monitorLayout.SetCellPosition(note,
+                        new TableLayoutPanelCellPosition(0, narrow ? 4 : 3));
+                    monitorLayout.SetColumnSpan(_listenOnlyCard, narrow ? 2 : 1);
+                    monitorLayout.SetColumnSpan(_pollingCard, narrow ? 2 : 1);
+                    monitorLayout.SetColumnSpan(note, 2);
+                    _listenOnlyCard.Margin = narrow ? new Padding(0, 0, 0, Px(4)) :
+                        new Padding(0, 0, Px(6), 0);
+                    _pollingCard.Margin = narrow ? new Padding(0, Px(4), 0, 0) :
+                        new Padding(Px(6), 0, 0, 0);
+                    note.Margin = new Padding(0, Px(4), 0, 0);
+                    int monitoringHeight = monitorLayout.Padding.Vertical + monitorHeaderHeight +
+                        monitorDescriptionHeight + (narrow ? cardHeight * 2 + Px(8) : cardHeight) +
+                        warningHeight + Px(3);
+
+                    int powerTitleHeight = Math.Max(Px(27), TextHeight(powerTitle, contentInnerWidth));
+                    int powerDescriptionHeight = Math.Max(Px(23),
+                        TextHeight(powerDescription, contentInnerWidth));
+                    powerLayout.RowStyles[0].Height = powerTitleHeight;
+                    powerLayout.RowStyles[1].Height = powerDescriptionHeight;
+                    int maxOptionWidth = 0;
+                    foreach (AutoPowerOffChoiceCard option in _powerChoices)
+                        maxOptionWidth = Math.Max(maxOptionWidth, option.GetPreferredWidth());
+                    bool stackPower = contentInnerWidth < maxOptionWidth * 4 + Px(12);
+                    // Keep all four columns allocated even in the two-row layout.
+                    // Reducing ColumnCount while occupied can displace controls.
+                    int visiblePowerColumns = stackPower ? 2 : 4;
+                    _powerOptions.RowCount = stackPower ? 2 : 1;
+                    for (int i = 0; i < _powerOptions.ColumnStyles.Count; i++)
+                    {
+                        _powerOptions.ColumnStyles[i].SizeType = SizeType.Percent;
+                        _powerOptions.ColumnStyles[i].Width = stackPower
+                            ? (i < 2 ? 50f : 0f) : 25f;
+                    }
+                    _powerOptions.RowStyles.Clear();
+                    for (int i = 0; i < _powerOptions.RowCount; i++)
+                        _powerOptions.RowStyles.Add(new RowStyle(SizeType.Percent,
+                            100f / _powerOptions.RowCount));
+                    for (int i = 0; i < _powerChoices.Length; i++)
+                    {
+                        _powerOptions.SetCellPosition(_powerChoices[i],
+                            new TableLayoutPanelCellPosition(i % visiblePowerColumns,
+                                i / visiblePowerColumns));
+                        _powerChoices[i].Margin = new Padding(i % visiblePowerColumns == 0 ? 0 : Px(4),
+                            Px(1), i % visiblePowerColumns == visiblePowerColumns - 1 ? 0 : Px(4), Px(1));
+                    }
+                    int optionsHeight = stackPower ? Px(94) : Px(47);
+                    int powerNoteHeight = _powerNote.Visible ?
+                        Math.Max(Px(25), TextHeight(_powerNote, contentInnerWidth) + Px(2)) : Px(6);
+                    if (!_powerOptions.Visible)
+                        optionsHeight = Math.Max(Px(47),
+                            TextHeight(_powerUnsupported, contentInnerWidth));
+                    powerLayout.RowStyles[2].Height = optionsHeight;
+                    powerLayout.RowStyles[3].Height = powerNoteHeight;
+                    int powerHeight = powerLayout.Padding.Vertical + powerTitleHeight +
+                        powerDescriptionHeight + optionsHeight + powerNoteHeight + Px(3);
+
+                    int saveWidth = Math.Max(Px(92), TextRenderer.MeasureText(
+                        _saveButton.Text, _saveButton.Font).Width + Px(26));
+                    int cancelWidth = Math.Max(Px(92), TextRenderer.MeasureText(
+                        _cancelButton.Text, _cancelButton.Font).Width + Px(26));
+                    footer.ColumnStyles[1].Width = cancelWidth + Px(12);
+                    footer.ColumnStyles[2].Width = saveWidth + Px(6);
+                    _saveButton.Size = new Size(saveWidth, Px(35));
+                    _cancelButton.Size = new Size(cancelWidth, Px(35));
+                    _cancelButton.Margin = new Padding(Px(6), 0, Px(6), 0);
+                    _saveButton.Margin = new Padding(Px(6), 0, 0, 0);
+                    int noteWidth = contentWidth - (int)footer.ColumnStyles[1].Width -
+                        (int)footer.ColumnStyles[2].Width - Px(16);
+                    bool stackedFooter = noteWidth < Px(115) ||
+                        TextHeight(footnote, Math.Max(Px(20), noteWidth)) > Px(43);
+                    int footerHeight;
+                    if (stackedFooter)
+                    {
+                        footer.RowStyles[0].Height = Math.Max(Px(25),
+                            TextHeight(footnote, contentWidth));
+                        footer.RowStyles[1].Height = Px(42);
+                        footer.SetCellPosition(footnote, new TableLayoutPanelCellPosition(0, 0));
+                        footer.SetColumnSpan(footnote, 3);
+                        footer.SetCellPosition(_cancelButton, new TableLayoutPanelCellPosition(1, 1));
+                        footer.SetCellPosition(_saveButton, new TableLayoutPanelCellPosition(2, 1));
+                        footerHeight = (int)footer.RowStyles[0].Height + Px(42);
+                    }
+                    else
+                    {
+                        footer.RowStyles[0].Height = Math.Max(Px(42),
+                            TextHeight(footnote, noteWidth));
+                        footer.RowStyles[1].Height = 0;
+                        footer.SetCellPosition(footnote, new TableLayoutPanelCellPosition(0, 0));
+                        footer.SetColumnSpan(footnote, 1);
+                        footer.SetCellPosition(_cancelButton, new TableLayoutPanelCellPosition(1, 0));
+                        footer.SetCellPosition(_saveButton, new TableLayoutPanelCellPosition(2, 0));
+                        footerHeight = (int)footer.RowStyles[0].Height;
+                    }
+                    int spacer = Px(10);
+                    root.RowStyles[0].Height = headerHeight;
+                    root.RowStyles[1].Height = monitoringHeight;
+                    root.RowStyles[2].Height = spacer;
+                    root.RowStyles[3].Height = powerHeight;
+                    root.RowStyles[4].Height = footerHeight;
+
+                    int desiredHeight = root.Padding.Vertical + headerHeight + monitoringHeight +
+                        spacer + powerHeight + footerHeight + Px(2);
+                    int dialogHeight = Math.Max(1, Math.Min(desiredHeight,
+                        work.Height - Px(24)));
+                    root.AutoScrollMinSize = new Size(0, desiredHeight - root.Padding.Vertical);
+                    ClientSize = new Size(dialogWidth, dialogHeight);
+                    // Recenter after the measured size changes, without leaving the display.
+                    Rectangle parentBounds = owner.Bounds;
+                    Left = Math.Clamp(parentBounds.Left + (parentBounds.Width - Width) / 2,
+                        work.Left, Math.Max(work.Left, work.Right - Width));
+                    Top = Math.Clamp(parentBounds.Top + (parentBounds.Height - Height) / 2,
+                        work.Top, Math.Max(work.Top, work.Bottom - Height));
+                    UpdateRoundedShape();
+                }
+                finally { reflowing = false; }
+            }
+            _reflowLayout = ReflowForCurrentDpi;
             Shown += (_, _) =>
             {
+                ReflowForCurrentDpi();
                 UpdateRoundedShape();
                 if (IsHandleCreated)
                 {
@@ -445,6 +620,7 @@ public sealed partial class SettingsForm
                 }
             };
             Resize += (_, _) => UpdateRoundedShape();
+            DpiChanged += (_, _) => BeginInvoke(new Action(ReflowForCurrentDpi));
         }
 
         public void UpdateAutoPowerOff(bool supported, bool editable,
@@ -461,6 +637,7 @@ public sealed partial class SettingsForm
                 _powerChoices[i].Selected = supported && selectedMinutes == minutes[i];
                 _powerChoices[i].Enabled = supported && editable;
             }
+            if (Visible) _reflowLayout?.Invoke();
         }
 
         private void SetMode(DeviceMonitoringMode mode)
@@ -586,6 +763,15 @@ public sealed partial class SettingsForm
             AccessibleName = caption;
         }
 
+        public int GetPreferredWidth()
+        {
+            int px = Math.Max(1, (int)Math.Ceiling(DeviceDpi / 96f));
+            using Font font = new("Segoe UI", 8.3f);
+            return TextRenderer.MeasureText(_caption, font,
+                new Size(4096, 4096), TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width
+                + (int)Math.Ceiling(42 * DeviceDpi / 96f) + px;
+        }
+
         protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(BackColor);
         protected override void OnMouseEnter(EventArgs e)
         {
@@ -639,20 +825,24 @@ public sealed partial class SettingsForm
             g.FillPath(brush, shape);
             g.DrawPath(outline, shape);
 
+            float scale = DeviceDpi / 96f;
             float cy = Height / 2f;
-            using Pen radioPen = new(_selected ? Accent : Color.Gray, 1.5f);
-            g.DrawEllipse(radioPen, 10, cy - 7, 14, 14);
+            using Pen radioPen = new(_selected ? Accent : Color.Gray, Math.Max(1f, 1.5f * scale));
+            g.DrawEllipse(radioPen, 10 * scale, cy - 7 * scale, 14 * scale, 14 * scale);
             if (_selected)
             {
                 using Brush dot = new SolidBrush(Accent);
-                g.FillEllipse(dot, 14, cy - 3, 6, 6);
+                g.FillEllipse(dot, 14 * scale, cy - 3 * scale, 6 * scale, 6 * scale);
             }
             Color textColor = Enabled || _selected
                 ? (_dark ? Color.WhiteSmoke : LightText)
                 : (_dark ? Color.FromArgb(156, 159, 165) : LightSecondary);
             using Font font = new("Segoe UI", 8.3f, _selected ? FontStyle.Bold : FontStyle.Regular);
+            int left = (int)Math.Ceiling(29 * scale);
+            int padding = (int)Math.Ceiling(5 * scale);
             TextRenderer.DrawText(g, _caption, font,
-                new Rectangle(29, 3, Math.Max(1, Width - 34), Math.Max(1, Height - 6)),
+                new Rectangle(left, padding, Math.Max(1, Width - left - padding),
+                    Math.Max(1, Height - 2 * padding)),
                 textColor, TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak |
                 TextFormatFlags.NoPrefix);
             if (Focused && ShowFocusCues)
@@ -743,6 +933,22 @@ public sealed partial class SettingsForm
             }
         }
 
+        public int GetPreferredHeight(int cardWidth)
+        {
+            float scale = DeviceDpi / 96f;
+            int left = (int)Math.Ceiling(47 * scale);
+            int right = (int)Math.Ceiling(12 * scale);
+            int width = Math.Max(1, cardWidth - left - right);
+            using Font titleFont = new("Segoe UI Semibold", 10f);
+            using Font descFont = new("Segoe UI", 8.5f);
+            int titleHeight = TextRenderer.MeasureText(_title, titleFont, new Size(width, 2048),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            int descriptionHeight = TextRenderer.MeasureText(_description, descFont,
+                new Size(width, 2048), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            return (int)Math.Ceiling(21 * scale) + titleHeight + descriptionHeight +
+                (int)Math.Ceiling(7 * scale);
+        }
+
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             // Same background-handling technique as HBM's RoundedPanel.
@@ -776,15 +982,16 @@ public sealed partial class SettingsForm
             g.FillPath(brush, path);
             g.DrawPath(outline, path);
 
-            float cx = 25f;
-            float cy = 28f;
+            float scale = DeviceDpi / 96f;
+            float cx = 25f * scale;
+            float cy = 28f * scale;
             using Pen radioPen = new(Enabled ? (_selected ? Accent : (_dark ? Color.LightGray : LightSecondary))
-                : Color.Gray, 1.7f);
-            e.Graphics.DrawEllipse(radioPen, cx - 9, cy - 9, 18, 18);
+                : Color.Gray, Math.Max(1f, 1.7f * scale));
+            e.Graphics.DrawEllipse(radioPen, cx - 9 * scale, cy - 9 * scale, 18 * scale, 18 * scale);
             if (_selected)
             {
                 using SolidBrush dot = new(Accent);
-                e.Graphics.FillEllipse(dot, cx - 4.5f, cy - 4.5f, 9, 9);
+                e.Graphics.FillEllipse(dot, cx - 4.5f * scale, cy - 4.5f * scale, 9 * scale, 9 * scale);
             }
 
             Color textColor = !Enabled ? (_dark ? Color.Gray : LightSecondary)
@@ -793,14 +1000,20 @@ public sealed partial class SettingsForm
                 : (_dark ? DarkSecondary : LightSecondary);
             using Font titleFont = new("Segoe UI Semibold", 10f);
             using Font descFont = new("Segoe UI", 8.5f);
-            Rectangle titleRect = new(47, 10, Math.Max(1, Width - 56), 30);
-            Rectangle descRect = new(47, 41, Math.Max(1, Width - 60), Math.Max(1, Height - 46));
+            int left = (int)Math.Ceiling(47 * scale);
+            int top = (int)Math.Ceiling(10 * scale);
+            int width = Math.Max(1, Width - left - (int)Math.Ceiling(12 * scale));
+            int titleHeight = TextRenderer.MeasureText(_title, titleFont,
+                new Size(width, 2048), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            Rectangle titleRect = new(left, top, width, titleHeight + (int)Math.Ceiling(3 * scale));
+            Rectangle descRect = new(left, top + titleHeight + (int)Math.Ceiling(4 * scale),
+                width, Math.Max(1, Height - top - titleHeight - (int)Math.Ceiling(9 * scale)));
             TextRenderer.DrawText(e.Graphics, _title, titleFont, titleRect, textColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak |
                 TextFormatFlags.NoPrefix);
             TextRenderer.DrawText(e.Graphics, _description, descFont, descRect, descColor,
                 TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak |
-                TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                TextFormatFlags.NoPrefix);
             if (Focused && ShowFocusCues)
             {
                 // The old rectangular focus indicator overrode the rounded visual

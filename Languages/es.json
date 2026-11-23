@@ -307,5 +307,7 @@
   "SidebarAutoPowerOff": "Autoapagado",
   "SidebarMonitoringMode": "Modo",
   "AutoPowerOffNotSupportedForDevice": "No disponible para tu dispositivo.",
-  "AutoPowerOffPowerOnToChange": "Los auriculares deben estar encendidos para cambiar esta opción."
+  "AutoPowerOffPowerOnToChange": "Los auriculares deben estar encendidos para cambiar esta opción.",
+  "ExitConfirmationTitle": "¿Salir de Hyper Battery Monitor?",
+  "ExitConfirmationMessage": "Hyper Battery Monitor se cerrará. Se perderán todos los cambios que no se hayan guardado o aplicado. ¿Deseas salir?"
 }
